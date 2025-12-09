@@ -1,1 +1,1 @@
-# 6D-pose-estimation
+# Lab03: Setup a project from scratch
