@@ -5,10 +5,10 @@
 
 - known objects -> classe di oggetti vista almeno una volta in trainig
 
-# Dataset LineMode
-Ogni folder rappresenta la classe di oggetto a cui siamo interessati nelle immagini contenute nel folder (es. 01 è scimmia, 06 è gatto), tutti gli altri oggetti nelle foto di quel folder sono considerati disturbi/rumore. Infatti avremo, per ogni immagine, solo la ground truth di un oggetto.
+# 1 Dataset Exploration
+Useremo il dataset LineMOD (in una versione pre-processata). Ogni folder rappresenta la classe di oggetto a cui siamo interessati nelle immagini contenute nel folder (es. 01 è scimmia, 06 è gatto), tutti gli altri oggetti nelle foto di quel folder sono considerati disturbi/rumore. Infatti avremo, per ogni immagine, solo la ground truth di un oggetto.
 
-Dentro ogni folder ci sono:
+Dentro ogni folder (13 dei 15 originali) ci sono:
 - cartella 'depth' -> informazioni di depth della foto i-esima
 
 - cartella 'mask' -> maschera dell'oggetto a cui siamo interessati nella foto i-esima
@@ -34,3 +34,9 @@ C'è anche il sistema di coordinate dell'immagine (2D). Questo ha origine in alt
 Si può notare che nelle immagini c'è una sorta di riquadro bianco e nero, quelli sono marker fiduciali che fanno da riferimenti di calibrazione. Infatti, quando i ricercatori hanno creato il dataset, non hanno indovinato la posizione degli oggetti ad occhio; hanno usato un software automatico per generare la ground-truth (R e t). Il software riconosce i quadratini e da questi calcola con alta precisione la posizione della telecamera rispetto il tavolo: una volta riconosciuta questa posizione si possono calcolare le posizioni degli oggetti che sono appoggiati sopra ottenendo il vettore che collega il centro dell'obiettivo al centro dell'oggetto e la rotazione del sistema di riferimento dell'oggetto rispetto il sistema di riferimento della telecamera.
 
 Nota: ci si potrebbe domandare quale dovrebbe essere l'utilità pratica di K, visto che la rete (non specifico quale e come) guarda l'immagine e predice direttamente R e t. Come dovrei fare a verificare che la predizione sia effettivamente giusta? Non posso andare ad occhio: qui entra in gioco la mappatura 3D -> 2D; prendiamo la posa (R, t) predetta, prendiamo il modello 3D dell'oggetto, usiamo K (insieme a R e t) per proiettare il modello 3D (fatto di punti) nella foto 2D. A questo punto, se il modello (o cubo se vogliamo) combacia con l'oggetto nella foto allora la predizione è corretta.
+
+# 2 YOLO Training
+La libreria ultralytics ha un suo caricatore di dati interno e altamente ottimizzato. Non usa le classi standard Dataset e DataLoader di PyTorch nello stesso modo in cui dovrà fare il modello di stima di posa. A YOLO basta dirgli dove trovare i dati tramite un file data.yaml. Si aspetta una struttura di cartelle semplice: una cartella per le immagini (images/) e una per le etichette (labels/), dove ogni immagine ha un file .txt con lo stesso nome.
+
+Il problema è che il dataset originale (LineMOD) non è in questo formato. Le informazioni sui bounding box sono dentro i filemgt.yml. La funzione create_dataset_YOLO (in utils/preprocessing.py) ha il compito di creare questa struttura di file per YOLO. Per farlo, crea un'istanza di CustomDatasetPose e la usa come un comodo "helper" per leggere i file `.yml` originali. Chiama il metodo load_6d_pose() per ottenere, per ogni immagine, le coordinate del bounding box già formattate correttamente per YOLO (bbox_YOLO).
+In pratica, CustomDatasetPose.py serve solo in questa fase di pre-elaborazione per tradurre il dataset dal formato originale a quello di YOLO. Una volta che le cartelle images e labels sono state create, il suo lavoro è finito.
