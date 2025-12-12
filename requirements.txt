@@ -1,1 +1,15 @@
-
+torch-geometric
+matplotlib
+seaborn
+scikit-learn
+pyyaml
+plotly
+open3d
+pcl
+Pillow
+tqdm
+ultralytics
+numpy-quaternion
+trimesh
+wandb
+comet-ml
