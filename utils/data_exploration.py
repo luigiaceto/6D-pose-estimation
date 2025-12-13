@@ -12,7 +12,7 @@ def load_image(label: int, object: int):
     """
     Starting from 6DPose_Estimation plot image given label and objectId
     """
-    img_path = f"./datasets/linemod/DenseFusion/Linemod_preprocessed/data/{label:02d}/rgb/{object:04d}.png"
+    img_path = f"./dataset/linemod/Linemod_preprocessed/data/{label:02d}/rgb/{object:04d}.png"
     img = Image.open(img_path).convert("RGB")
     plt.imshow(img)
     plt.show()
@@ -23,63 +23,32 @@ def load_depth_image(path: str = None):
     plt.show()
     return img
 
-def extract_cam_K_from_info(info):
+def get_camera_intrinsics(dataset_root):
     """
-    Given dictionary containing data of yaml file of a given label, return list of all camera intrinsics.
-
-    Input:
-        info: it is a dictionary with keys '0', '1' and so on, each of the values is a dictionary containing key 'cam_K'
-    Output:
-        cam_K_list: list of camera intrinsics
+    Estrae la matrice dei parametri intrinseci (K) dal primo file gt.yml disponibile.
+    Si assume che la camera sia la stessa per tutto il dataset.
     """
-    cam_K_list = []
-    for key, val in info.items():
-        if "cam_K" in val:
-            cam_K_list.append(val["cam_K"])
-    return cam_K_list
-
-def check_cam_K_equal(root_path: str = None):
-    """
-    Check if all info.yaml in the path contain the same cam_K
-    """
-    all_cam_Ks = [] # list of all found camera_intrinsics
-
-    # for each label
-    for obj_class in sorted(os.listdir(root_path)):
-        class_path = os.path.join(root_path, obj_class)
-        # if path of class is not a directory do nothing
-        if not os.path.isdir(class_path):
-            continue
-
-        info_path = os.path.join(class_path, "info.yml")
-        if not os.path.exists(info_path):
-            continue
-
-        # if file exists
-        with open(info_path, 'r') as f:
-            info = yaml.safe_load(f)
-
-        cam_Ks = extract_cam_K_from_info(info) # get list of all camera intrinsics
-        if len(cam_Ks) == 0:
-            print(f"[Warning] No cam_K found in {obj_class}/info.yml")
-            continue
-
-        # Extend the global list
-        all_cam_Ks.extend(cam_Ks)
-
-    # check if all camera intrinsics are equal
-    if len(all_cam_Ks) == 0:
-        print("No cam_K found in any file.")
-    else:
-        first_cam_K = all_cam_Ks[0]
-        all_equal = all(cam_K == first_cam_K for cam_K in all_cam_Ks)
-
-        if all_equal:
-            print("All cam_K are equal in any info.yml")
+    # Proviamo a leggere il file gt della prima cartella (01)
+    # Linemod di solito ha file tipo '01_gt.yml' nella root
+    target_file = os.path.join(dataset_root, "01_gt.yml")    
+    if not os.path.exists(target_file):
+        # Fallback: prova a cercare dentro data/01/ se la struttura è diversa
+        target_file = os.path.join(dataset_root, "data", "01", "gt.yml")
+        if not os.path.exists(target_file):
+            raise FileNotFoundError(f"Impossibile trovare un file di ground truth per estrarre cam_K in {dataset_root}")
+   
+    with open(target_file, 'r') as f:
+        data = yaml.load(f, Loader=yaml.CLoader)
+           
+        # Prende il primo frame (chiave '0') e cerca 'cam_K'
+        # Nota: In Linemod 'cam_K' è spesso salvato come lista di 9 elementi
+        first_frame_data = data[0][0] # Chiave 0 (frame id), primo oggetto della lista
+        
+        if 'cam_K' in first_frame_data:
+            cam_K = np.array(first_frame_data['cam_K'], dtype=np.float32).reshape(3, 3)
+            return cam_K
         else:
-            print("There are different cam_K in the files info.yml")
-    
-        return first_cam_K
+            raise KeyError("La chiave 'cam_K' non è presente nel file YAML analizzato.")
     
 def get_class_names():
     """
@@ -92,10 +61,12 @@ def get_class_names():
             folder_names.append(folder_id)
     return folder_names
 
+# ci serve ???
 def compare_rgb_mask_in_data(root, extensions={'.png', '.jpg', '.jpeg', '.bmp'}):
     """
-    For each class in "root", compare files in folders "rgb" and "mask"
-    Print files that are only in one of the folders
+    For each class in "root", compare files in folders "rgb" and "mask".
+    Print files that are only in one of the folders.
+    Se manca la maschera, spesso quel campione è inutilizzabile per certi task.
 
     Args:
         root (str): main path (f.i. "data/")
@@ -193,22 +164,15 @@ def load_depth_patch(path: str = None, folder: str = None, imageId: str = None, 
 
 def plot_batch_data(train_loader, val_loader, test_loader):
     """
-    Get only the first 1 batch.
+    Visualizza un intero batch di dati cine esce dal DataLoader (dopo trasformazioni e padding).
     """
-
-    # train_subset_num_batches = 1
-    # val_subset_num_batches = 1
-    # test_subset_num_batches = 1
-    # train_subset = list(itertools.islice(train_loader, train_subset_num_batches))
-    # val_subset = list(itertools.islice(val_loader, val_subset_num_batches))
-    # test_subset = list(itertools.islice(test_loader, test_subset_num_batches))
 
     # Get one batch from the train loader (there are batch_size images)
     batch = next(iter(train_loader)) # it uses load_6d_pose, so one pose per object
 
     # Extract relevant data
     rgb_images = batch["rgb"]         # (B, 3, H, W)
-    bboxes = batch["bbox_YOLO"]            # (B, 4) in pixel coords: x_center, y_center, width, height
+    bboxes = batch["bbox_YOLO"]       # (B, 4) in pixel coords: x_center, y_center, width, height
     obj_ids = batch["obj_id"]         # (B,)
 
     # Convert to numpy and rearrange channels
