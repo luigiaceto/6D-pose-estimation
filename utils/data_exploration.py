@@ -29,13 +29,12 @@ def get_camera_intrinsics(dataset_root):
     Si assume che la camera sia la stessa per tutto il dataset.
     """
     
-    target_file = os.path.join(dataset_root, "data/01/gt.yml")
+    target_file = os.path.join(dataset_root, "data/01/info.yml")
    
     with open(target_file, 'r') as f:
         data = yaml.load(f, Loader=yaml.CLoader)
         
-        # Prende il primo frame (chiave '0') e cerca 'cam_K'
-        first_frame_data = data[0][0] # Chiave 0 (frame id), primo oggetto della lista
+        first_frame_data = data[0]
         
         if 'cam_K' in first_frame_data:
             cam_K = np.array(first_frame_data['cam_K'], dtype=np.float32).reshape(3, 3)
