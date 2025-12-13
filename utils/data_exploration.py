@@ -12,7 +12,7 @@ def load_image(label: int, object: int):
     """
     Starting from 6DPose_Estimation plot image given label and objectId
     """
-    img_path = f"./dataset/linemod/Linemod_preprocessed/data/{label:02d}/rgb/{object:04d}.png"
+    img_path = f"./datasets/linemod/DenseFusion/Linemod_preprocessed/data/{label:02d}/rgb/{object:04d}.png"
     img = Image.open(img_path).convert("RGB")
     plt.imshow(img)
     plt.show()
@@ -56,7 +56,7 @@ def get_class_names():
     """
     folder_names = []
     for folder_id in range(1, 16):
-        folder_path = os.path.join('./dataset/linemod/Linemod_preprocessed/data', f"{folder_id:02d}", "rgb")
+        folder_path = os.path.join('./datasets/linemod/DenseFusion/Linemod_preprocessed/data', f"{folder_id:02d}", "rgb")
         if os.path.exists(folder_path):
             folder_names.append(folder_id)
     return folder_names
