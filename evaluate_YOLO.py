@@ -9,7 +9,7 @@ def get_YOLO(path: str = None):
 
 def evaluate_YOLO(path: str = None, epochs: int = None, batch_size: int = None, IMG_SIZE: int = None, device = torch.device("cpu")):
     """
-        Evaluate (best) model on test split.
+     Evaluate (best) model on test split.
     """
     model = get_YOLO(path)
 
@@ -19,5 +19,5 @@ def evaluate_YOLO(path: str = None, epochs: int = None, batch_size: int = None, 
         batch=batch_size,
         imgsz=IMG_SIZE,
         device=device,
-        split="test"
+        split="test" # testa il modello sul test set
     )

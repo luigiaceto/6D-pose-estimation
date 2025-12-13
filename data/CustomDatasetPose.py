@@ -24,31 +24,33 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
             image mean
             image standard deviation
 
-        Lavora sia per YOLO che per il modello di 6D pose estimation basilare (che usa solo immagini RGB)
+        Lavora sia per YOLO che per il modello di 6D pose estimation basilare (che usa solo immagini RGB).
         """
         self.dataset_root = dataset_root
         self.split = split
         self.train_ratio = train_ratio
         self.seed = seed
         self.device = device
-        self.camera_intrinsics = [cam_K[0], cam_K[4], cam_K[2], cam_K[5]]
+        self.camera_intrinsics = [cam_K[0], cam_K[4], cam_K[2], cam_K[5]] # ci serve ???
 
         # Get list of all samples (folder_id, sample_id)
         self.samples, self.folder_names = self.get_all_samples()
 
-        # Check if samples were found
+        # Check if samples were found - ci serve ???
         if not self.samples:
             raise ValueError(f"No samples found in {self.dataset_root}. Check the dataset path and structure.")
 
         # Split into training and validation+test sets
-        labels = [el[0] for el in self.samples]
+        labels = [elem[0] for elem in self.samples]
         self.train_samples, self.val_test_samples = train_test_split(
             self.samples, train_size=self.train_ratio, random_state=self.seed, stratify=labels
         )
 
         # split validation+test set (by default 30% of the original dataset) into validation and test sets
-        labels = [el[0] for el in self.val_test_samples]
-        self.val_samples, self.test_samples = train_test_split(self.val_test_samples, train_size=0.5, random_state=self.seed, stratify=labels)
+        labels = [elem[0] for elem in self.val_test_samples]
+        self.val_samples, self.test_samples = train_test_split(
+            self.val_test_samples, train_size=0.5, random_state=self.seed, stratify=labels
+        )
 
         # Select the appropriate split
         if split == "train":
@@ -58,7 +60,7 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
         else:
             self.samples = self.test_samples
 
-        # find mean and standard deviation of images, if not given as parameter
+        # find mean and standard deviation of images, if not given as parameter. In training non si forniscono.
         if (img_mean is not None and img_std is not None):
             self.image_mean = img_mean
             self.image_std = img_std
@@ -71,7 +73,7 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
         if self.split == 'train':
             self.transform_img = transforms.Compose([
                                 transforms.ToTensor(),  # convert to float32
-                                # transforms.Normalize(mean=self.image_mean, std=self.image_std)
+                                # transforms.Normalize(mean=self.image_mean, std=self.image_std) # YOLO fa la normalizzazione automatica
                             ])
 
             self.transform_crop = transforms.Compose([
@@ -96,15 +98,19 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
         self.ground_truths = self.extract_ground_truth()
 
     def get_samples_id(self):
+        """
+        Ritorna lista di tuple (numero cartella, numero immagine)
+        """
         return self.samples
 
     def get_all_samples(self):
-        """Retrieve the list of all available sample indices from all folders."""
+        """
+        Retrieve the list of all available sample indices from all folders.
+        """
         folder_names = []
         samples = []
         for folder_id in range(1, 16):  # Assuming folders are named 01 to 15
             folder_path = os.path.join(self.dataset_root, 'data', f"{folder_id:02d}", "rgb")
-            #print(folder_path)
             if os.path.exists(folder_path):
                 # get id of the images
                 folder_names.append(folder_id)
@@ -114,7 +120,8 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
     
     def findMeanStd(self, train_samples):
         """
-            Given dataset root and training samples in the format (folder_id, sample_id), compute mean and standard deviation
+        Given dataset root and training samples in the format (folder_id, sample_id), compute
+        mean and standard deviation.
         """
 
         # Transform to tensor [C, H, W]
@@ -146,9 +153,9 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
     
     def extract_ground_truth(self):
         ground_truth = {}
-        for el in self.folder_names:
+        for elem in self.folder_names:
 
-            pose_file = os.path.join(self.dataset_root, f"{el:02d}_gt.yml")
+            pose_file = os.path.join(self.dataset_root, f"{elem:02d}_gt.yml")
 
             with open(pose_file, 'r') as f:
                 pose_data = yaml.load(f, Loader=yaml.CLoader)
@@ -166,12 +173,14 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
                 extracted_data[key] = extracted # store image_id (int) and extracted value
             
             # store for each class all the extracted data
-            ground_truth[el] = extracted_data
+            ground_truth[elem] = extracted_data
 
         return ground_truth
     
     def load_config(self):
-        """Load YAML configuration files for object info for a specific folder."""
+        """
+        Load YAML configuration files for object info for a specific folder.
+        """
         objects_info_path = os.path.join(self.dataset_root, 'models', f"models_info.yml")
 
         with open(objects_info_path, 'r') as f:
@@ -179,66 +188,42 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
 
         return objects_info
 
-    #Define here some useful functions to access the data
+    # Define here some useful functions to access the data
     def load_image(self, img_path):
-        """Load an RGB image."""
+        """
+        Load an RGB image.
+        """
         img = Image.open(img_path).convert("RGB")
         return self.transform_img(img)
 
     def load_cropped_image(self, img_path, bbox):
-        """Load an RGB image, crop."""
+        """
+        Load an RGB image, crop.
+        """
         img = Image.open(img_path).convert("RGB")
         x, y, w, h = bbox
         cropped_img = img.crop((x, y, x+w, y+h)) # give as input the coordinates for left, top, right, bottom
         return self.transform_crop(cropped_img)
 
+    # Ci serve per la baseline ???
     def load_depth(self, depth_path):
-        """Load a depth image."""
+        """
+        Load a depth image.
+        """
         return cv2.imread(depth_path, cv2.IMREAD_UNCHANGED).astype(np.float32)
 
+    # Ci serve per la baseline ???
     def load_mask(self, path):
-        """Load mask"""
+        """
+        Load mask.
+        """
         # load in grayscale mode
         return cv2.imread(path, cv2.IMREAD_GRAYSCALE).astype(np.uint8)
 
-    def depth_to_pointcloud(self, masked_depth):
-        """
-        Convert pixel coordinates + depth to 3D metric coordinates using intrinsic parameters.
-        Returns x, y, z as Nx3 array.
-
-        Convert pixel coordinate + depth to 3D metric coordinates using camera intrinsics
-
-        Convertion equation:
-        X = (u - cx) * Z / fx
-        Y = (v - cy) * Z / fy
-        Z = depth
-
-        where (u,v) are pixel coordinates and Z depth
-        """
-        fx, fy, cx, cy = self.camera_intrinsics
-        height, width = masked_depth.shape
-        valid_mask = masked_depth > 0
-
-        u, v = np.meshgrid(np.arange(width), np.arange(height))
-        u_valid = u[valid_mask]
-        v_valid = v[valid_mask]
-        z_valid = masked_depth[valid_mask].astype(np.float32) / 1000.0
-
-        # Ensure z_valid is not zero or very small to avoid division by zero
-        valid_depth_mask = z_valid > 1e-6
-        u_valid = u_valid[valid_depth_mask]
-        v_valid = v_valid[valid_depth_mask]
-        z_valid = z_valid[valid_depth_mask]
-
-        x_meters = (u_valid - cx) * z_valid / fx
-        y_meters = (v_valid - cy) * z_valid / fy
-        z_meters = z_valid
-
-        pointcloud = np.stack([x_meters, y_meters, z_meters], axis=-1).reshape(-1, 3)  # Shape: (N, 3)
-        return pointcloud
-
     def load_6d_pose(self, folder_id: int = None, sample_id: int = None):
-        """Load the 6D pose (translation and rotation) for the object in this sample."""
+        """
+        Load the 6D pose (translation and rotation) for the object in this sample.
+        """
         pose = self.ground_truths[folder_id][sample_id]
         
         translation = np.array(pose['cam_t_m2c'], dtype=np.float32)/1000.0  # [3] ---> (x,y,z) in meters
@@ -281,44 +266,33 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
         return cropped_img, translation, rotation, quaternion, bbox_base, obj_id, bbox_YOLO
 
     def __len__(self):
-        #Return the total number of samples in the selected split.
+        """
+        Return the total number of samples in the selected split.
+        """
         return len(self.samples)
 
     def __getitem__(self, idx):
-        #Load a dataset sample.
+        """
+        Load a dataset sample.
+        """
         folder_id, sample_id = self.samples[idx] # both are integer
 
-        # Load the correct camera intrinsics and object info for this folder
-        # objects_info = self.load_config()
-
         img_path = os.path.join(self.dataset_root, 'data', f"{folder_id:02d}", f"rgb/{sample_id:04d}.png")
-        # depth_path = os.path.join(self.dataset_root, 'data', f"{folder_id:02d}", f"depth/{sample_id:04d}.png")
-        # mask_path = os.path.join(self.dataset_root, 'data', f"{folder_id:02d}", f"mask/{sample_id:04d}.png")
 
         img = self.load_image(img_path)
-        # depth = self.load_depth(depth_path)
-        # mask = self.load_mask(mask_path)
-
-        # mask_binary = mask != 0 # take non zero values
-        # masked_depth = np.where(mask_binary, depth, 0) # apply binary mask to a depth image
-
-        # pointcloud = self.depth_to_pointcloud(masked_depth)
 
         cropped_img, translation, rotation, quaternion, bbox_base, obj_id, bbox_YOLO = self.load_6d_pose(folder_id, sample_id)
 
-        #Dictionary with all the data
         return {
-            "rgb": img,
-            "cropped_img": cropped_img.to(self.device),
-            # "depth": torch.tensor(depth, dtype=torch.float32).to(self.device),
-            # "pointcloud": torch.tensor(pointcloud, dtype=torch.float32).to(self.device),
-            # "camera_intrinsics": self.camera_intrinsics,
-            # "objects_info": objects_info,
+            # sample
+            "sample_id": torch.tensor(self.samples[idx]).to(self.device),
+            "rgb": img, # per YOLO
+            "cropped_img": cropped_img.to(self.device), # per la baseline
+            # label/ground truth
             "translation": torch.tensor(translation).to(self.device),
             "rotation": torch.tensor(rotation).to(self.device),
             "quaternion": torch.tensor(quaternion).to(self.device),
             "bbox_base": torch.tensor(bbox_base).to(self.device),
             "bbox_YOLO": torch.tensor(bbox_YOLO).to(self.device),
             "obj_id": torch.tensor(obj_id).to(self.device),
-            "sample_id": torch.tensor(self.samples[idx]).to(self.device)
         }

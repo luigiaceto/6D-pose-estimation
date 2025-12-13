@@ -7,10 +7,11 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
+
 def copy_gt_file(file_names: list = None):
     """
     Trasloca i file che contengono le ground truth del dataset mettendoli
-    nella cartella padre, uno per classe di foto.
+    nella cartella datasets/linemod/DenseFusion/Linemod_preprocessed, uno per classe di foto.
     """
     for file_name in file_names:
         shutil.copy(f"./dataset/linemod/Linemod_preprocessed/data/{file_name:02d}/gt.yml", f"./dataset/linemod/Linemod_preprocessed/{file_name:02d}_gt.yml")
@@ -91,6 +92,10 @@ def quaternion_gt(input_path=None):
                     )
 
 def create_YOLO_yaml(path, folder_names):
+    """
+    Crea il folder per YOLO che contiene lo yaml. Esso verrà usato come mappa
+    da YOLO per localizzare i vari files.
+    """
     # create a folder to contain the dataset for YOLO model
     os.makedirs(f"{path}/datasets/linemod/YOLO/datasets", exist_ok=True)
 
@@ -119,7 +124,9 @@ def create_YOLO_yaml(path, folder_names):
     return number_classes, class_names
 
 def create_dataset_YOLO(number_classes, train_samples, validation_samples, test_samples, index_dict, path, train_dataset):
-    # create images and labels
+    """
+    Create images and labels in the YOLO folder created in the previous function.
+    """
     # dataset = [train_samples, validation_samples, test_samples]
     folder_names = ["train", "val", "test"]
 
