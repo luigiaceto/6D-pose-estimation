@@ -36,17 +36,16 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
         # Get list of all samples (folder_id, sample_id)
         self.samples, self.folder_names = self.get_all_samples()
 
-        # Check if samples were found - ci serve ???
         if not self.samples:
             raise ValueError(f"No samples found in {self.dataset_root}. Check the dataset path and structure.")
 
-        # Split into training and validation+test sets
+        # Split into [training set] and [validation set + test set]
         labels = [elem[0] for elem in self.samples]
         self.train_samples, self.val_test_samples = train_test_split(
             self.samples, train_size=self.train_ratio, random_state=self.seed, stratify=labels
         )
 
-        # split validation+test set (by default 30% of the original dataset) into validation and test sets
+        # split [validation set + test set] (by default 30% of the original dataset) into [validation set] and [test set]
         labels = [elem[0] for elem in self.val_test_samples]
         self.val_samples, self.test_samples = train_test_split(
             self.val_test_samples, train_size=0.5, random_state=self.seed, stratify=labels
@@ -81,8 +80,7 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
                                 transforms.RandomGrayscale(p=0.1),
                                 transforms.RandomApply([transforms.GaussianBlur(kernel_size=3)], p=0.1),
                                 transforms.ToTensor(),
-                                # normalize images according to these values found
-                                transforms.Normalize(mean=self.image_mean, std=self.image_std)
+                                transforms.Normalize(mean=self.image_mean, std=self.image_std) # normalize images according to the values found
                             ])
         else:
             self.transform_img = transforms.Compose([
@@ -109,13 +107,13 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
         """
         folder_names = []
         samples = []
-        for folder_id in range(1, 16):  # Assuming folders are named 01 to 15
+        for folder_id in range(1, 16):  # Assuming folders are named 01 02 ... 15
             folder_path = os.path.join(self.dataset_root, 'data', f"{folder_id:02d}", "rgb")
             if os.path.exists(folder_path):
                 # get id of the images
                 folder_names.append(folder_id)
                 sample_ids = sorted([int(f.split('.')[0]) for f in os.listdir(folder_path) if f.endswith('.png')])
-                samples.extend([(folder_id, sid) for sid in sample_ids])  # Store (folder_id, sample_id)
+                samples.extend([(folder_id, sid) for sid in sample_ids])  # store (folder_id, sample_id)
         return samples, folder_names
     
     def findMeanStd(self, train_samples):
@@ -124,7 +122,7 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
         mean and standard deviation.
         """
 
-        # Transform to tensor [C, H, W]
+        # transform to tensor [C, H, W]
         to_tensor = transforms.ToTensor()
 
         # initialize sum
@@ -166,7 +164,7 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
             for key, value in pose_data.items():
                 entry = value[0] # get first object of image, entry is a dictionary
 
-                # Extract desidered key
+                # extract desidered key
                 extracted = {k: entry[k] for k in keys_to_extract if k in entry}
 
                 # store in extracted_data
@@ -188,7 +186,7 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
 
         return objects_info
 
-    # Define here some useful functions to access the data
+    # define here some useful functions to access the data
     def load_image(self, img_path):
         """
         Load an RGB image.
@@ -205,14 +203,14 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
         cropped_img = img.crop((x, y, x+w, y+h)) # give as input the coordinates for left, top, right, bottom
         return self.transform_crop(cropped_img)
 
-    # Ci serve per la baseline ???
+    # ci serve per la baseline ???
     def load_depth(self, depth_path):
         """
         Load a depth image.
         """
         return cv2.imread(depth_path, cv2.IMREAD_UNCHANGED).astype(np.float32)
 
-    # Ci serve per la baseline ???
+    # ci serve per la baseline ???
     def load_mask(self, path):
         """
         Load mask.
@@ -235,12 +233,12 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
         
         cropped_img = self.load_cropped_image(os.path.join(self.dataset_root, 'data', f"{folder_id:02d}", "rgb", f"{sample_id:04d}.png"), bbox_base)
 
-        # Compute initial center
+        # compute initial center
         x_min, y_min, width, height = np.array(pose['obj_bb'], dtype=np.float32)
         x_center = x_min + width / 2
         y_center = y_min + height / 2
 
-        # Clip center to image bounds and adjust width/height accordingly
+        # slip center to image bounds and adjust width/height accordingly
         if x_center < 0:
             width += 2 * x_center  # x_center is negative, subtract its absolute value * 2 from width
             x_center = 0
@@ -255,7 +253,7 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
             height -= 2 * (y_center - IMG_HEIGHT)
             y_center = IMG_HEIGHT
 
-        # Ensure width and height are not negative
+        # ensure width and height are not negative.
         # This is when bounding box is completely outside image (it should never happen)
         width = max(0, width)
         height = max(0, height)
@@ -283,7 +281,7 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
 
         cropped_img, translation, rotation, quaternion, bbox_base, obj_id, bbox_YOLO = self.load_6d_pose(folder_id, sample_id)
 
-        return {
+        return { # la depth può servire per la baseline ???
             # sample
             "sample_id": torch.tensor(self.samples[idx]).to(self.device),
             "rgb": img, # per YOLO

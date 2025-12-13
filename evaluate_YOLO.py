@@ -1,17 +1,14 @@
 import torch
 from ultralytics import YOLO
 
-def get_YOLO(path: str = None):
-    if path is None:
-        print("Path cannot be None")
-        return None
-    return YOLO(f"{path}/checkpoints/best.pt")
 
 def evaluate_YOLO(path: str = None, epochs: int = None, batch_size: int = None, IMG_SIZE: int = None, device = torch.device("cpu")):
     """
-     Evaluate (best) model on test split.
+    Evaluate (best) model on test split.
+    Uses the 'best.pt' weights obtained after the finetuning.
     """
-    model = get_YOLO(path)
+
+    model = YOLO(f"{path}/checkpoints/best.pt")
 
     results = model.val(
         data=f"{path}/datasets/linemod/YOLO/datasets/data.yaml",

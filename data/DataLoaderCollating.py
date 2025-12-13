@@ -80,7 +80,7 @@ def rgbd_collate_fn(batch):
         pad_H = max_H - H
         pad_W = max_W - W
     
-        # Calcolo padding simmetrico
+        # calcolo padding simmetrico
         pad_left = pad_W // 2
         pad_right = pad_W - pad_left
         pad_top = pad_H // 2
@@ -88,16 +88,16 @@ def rgbd_collate_fn(batch):
     
         padding = (pad_left, pad_right, pad_top, pad_bottom)
             
-        # Padding Immagine RGB (replicate per evitare bordi netti)
+        # padding Immagine RGB (replicate per evitare bordi netti)
         padded_img = F.pad(img, padding, mode='replicate')
         padded_cropped_imgs.append(padded_img)
     
-        # Padding Depth Map (costante 0 per indicare "nessun dato/sfondo")
-        # Assumiamo che 'depth' sia [1, H, W]
+        # padding Depth Map (costante 0 per indicare "nessun dato/sfondo").
+        # pssumiamo che 'depth' sia [1, H, W]
         padded_depth = F.pad(depth, padding, mode='constant', value=0)
         padded_depths.append(padded_depth)
     
-        # Salviamo i valori di padding per poter eventualmente ricostruire l'originale
+        # salviamo i valori di padding per poter eventualmente ricostruire l'originale
         padding_tensor = torch.tensor([pad_left, pad_right, pad_top, pad_bottom])
         paddings.append(padding_tensor)
  

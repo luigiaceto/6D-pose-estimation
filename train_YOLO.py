@@ -2,11 +2,6 @@ import torch
 import shutil
 from ultralytics import YOLO
 
-def get_YOLO(path: str = None):
-    if path is None:
-        print("Path cannot be None")
-        return None
-    return YOLO(f"{path}/checkpoints/yolo11n.pt") # carica YOLO pre-addestrato
 
 def train_YOLO(path: str = None, epochs: int = None, batch_size: int = None, device = torch.device("cpu"), IMG_SIZE: int = None):
     """
@@ -15,7 +10,8 @@ def train_YOLO(path: str = None, epochs: int = None, batch_size: int = None, dev
     Save model to checkpoints.
     """
     
-    model = get_YOLO(path)
+    # se 'yolo11n.pt' (i pesi pre-addestrati) non sono già dentro 'checkpoints/' allora verranno scaricati sul momento
+    model = YOLO(f"{path}/checkpoints/yolo11n.pt")
 
     # model will automatically scale the image and related bounding box according to imgsz.
     # Il metodo train stampa ad ogni epoca di validazione le metriche
