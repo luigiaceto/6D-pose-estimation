@@ -6,6 +6,7 @@ The project notebook has been written in order to run the experiments using cola
 then just follow the notebook.
 
 ## 'datasets/' folder structure
+L'obiettivo è arrivare alla seguente struttura del folder datasets/
 ```text
 datasets/
 └── linemod/
