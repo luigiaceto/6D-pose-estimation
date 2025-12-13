@@ -28,20 +28,13 @@ def get_camera_intrinsics(dataset_root):
     Estrae la matrice dei parametri intrinseci (K) dal primo file gt.yml disponibile.
     Si assume che la camera sia la stessa per tutto il dataset.
     """
-    # Proviamo a leggere il file gt della prima cartella (01)
-    # Linemod di solito ha file tipo '01_gt.yml' nella root
-    target_file = os.path.join(dataset_root, "01_gt.yml")    
-    if not os.path.exists(target_file):
-        # Fallback: prova a cercare dentro data/01/ se la struttura è diversa
-        target_file = os.path.join(dataset_root, "data", "01", "gt.yml")
-        if not os.path.exists(target_file):
-            raise FileNotFoundError(f"Impossibile trovare un file di ground truth per estrarre cam_K in {dataset_root}")
+    
+    target_file = os.path.join(dataset_root, "data/01/gt.yml")
    
     with open(target_file, 'r') as f:
         data = yaml.load(f, Loader=yaml.CLoader)
-           
+        
         # Prende il primo frame (chiave '0') e cerca 'cam_K'
-        # Nota: In Linemod 'cam_K' è spesso salvato come lista di 9 elementi
         first_frame_data = data[0][0] # Chiave 0 (frame id), primo oggetto della lista
         
         if 'cam_K' in first_frame_data:
