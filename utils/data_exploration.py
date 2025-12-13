@@ -33,11 +33,11 @@ def get_camera_intrinsics(dataset_root):
    
     with open(target_file, 'r') as f:
         data = yaml.load(f, Loader=yaml.CLoader)
-        
+
         first_frame_data = data[0]
         
         if 'cam_K' in first_frame_data:
-            cam_K = np.array(first_frame_data['cam_K'], dtype=np.float32).reshape(3, 3)
+            cam_K = np.array(first_frame_data['cam_K'], dtype=np.float32)
             return cam_K
         else:
             raise KeyError("La chiave 'cam_K' non è presente nel file YAML analizzato.")
