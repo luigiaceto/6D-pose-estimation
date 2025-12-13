@@ -10,7 +10,7 @@ from data.CustomDatasetPose import IMG_WIDTH, IMG_HEIGHT
 
 def load_image(label: int, object: int):
     """
-    Starting from 6DPose_Estimation plot image given label and objectId
+    Starting from 6DPose_Estimation plot image given label and objectId.
     """
     img_path = f"./datasets/linemod/DenseFusion/Linemod_preprocessed/data/{label:02d}/rgb/{object:04d}.png"
     img = Image.open(img_path).convert("RGB")
@@ -25,7 +25,7 @@ def load_depth_image(path: str = None):
 
 def get_camera_intrinsics(dataset_root):
     """
-    Estrae la matrice dei parametri intrinseci (K) dal primo file gt.yml disponibile.
+    Estrae la matrice dei parametri intrinseci (K) dal primo file info.yml disponibile.
     Si assume che la camera sia la stessa per tutto il dataset.
     """
     
@@ -98,6 +98,7 @@ def compare_rgb_mask_in_data(root, extensions={'.png', '.jpg', '.jpeg', '.bmp'})
 
     print(f"Total files only in rgb: {only_rgb}")
     print(f"Total files only in mask: {only_mask}")
+
 
 def load_dataset_distribution(counter_df, index_dict, number_classes):
     """
