@@ -4,10 +4,8 @@ import numpy as np
 
 def set_device():
     if torch.cuda.is_available():
-        print("Using Cuda")
         device = torch.device("cuda")
     else:
-        print("Using CPU")
         device = torch.device("cpu")
     return device
 

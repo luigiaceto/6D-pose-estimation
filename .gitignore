@@ -3,3 +3,4 @@ __pycache__
 *.pdf
 domande.md
 datasets/
+runs/

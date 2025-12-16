@@ -46,17 +46,17 @@ def rgb_collate_fn(batch):
 
     batch_dict = {
         # sample
-        "sample_id": torch.stack([item['sample_id'] for item in batch]).to(device),
-        "rgb": torch.stack([item['rgb'] for item in batch]).to(device),
-        "cropped_img": torch.stack(padded_cropped_imgs).to(device),
-        "paddings":torch.stack(paddings).to(device),
+        "sample_id": torch.stack([item['sample_id'] for item in batch]),
+        "rgb": torch.stack([item['rgb'] for item in batch]),
+        "cropped_img": torch.stack(padded_cropped_imgs),
+        "paddings":torch.stack(paddings),
         # label/ground truth
-        "translation": torch.stack([item['translation'] for item in batch]).to(device),
-        "rotation": torch.stack([item['rotation'] for item in batch]).to(device),
-        "quaternion": torch.stack([item['quaternion'] for item in batch]).to(device),
-        "bbox_base": torch.stack([item['bbox_base'] for item in batch]).to(device),
-        "bbox_YOLO": torch.stack([item['bbox_YOLO'] for item in batch]).to(device), # utilizzata per YOLO
-        "obj_id": torch.stack([item['obj_id'] for item in batch]).to(device),
+        "translation": torch.stack([item['translation'] for item in batch]),
+        "rotation": torch.stack([item['rotation'] for item in batch]),
+        "quaternion": torch.stack([item['quaternion'] for item in batch]),
+        "bbox_base": torch.stack([item['bbox_base'] for item in batch]),
+        "bbox_YOLO": torch.stack([item['bbox_YOLO'] for item in batch]), # utilizzata per YOLO
+        "obj_id": torch.stack([item['obj_id'] for item in batch]),
     }
 
     return batch_dict
@@ -104,17 +104,17 @@ def rgbd_collate_fn(batch):
     batch_dict = {
         # sample
         # "rgb": ... (non serve per il training)
-        "sample_id": torch.stack([item['sample_id'] for item in batch]).to(device),
-        "paddings": torch.stack(paddings).to(device),
-        "cropped_img": torch.stack(padded_cropped_imgs).to(device),
-        "depth": torch.stack(padded_depths).to(device),  # Stackiamo le depth map
-        "camera_intrinsics": torch.stack([item['camera_intrinsics'] for item in batch]).to(device),
+        "sample_id": torch.stack([item['sample_id'] for item in batch]),
+        "paddings": torch.stack(paddings),
+        "cropped_img": torch.stack(padded_cropped_imgs),
+        "depth": torch.stack(padded_depths),  # Stackiamo le depth map
+        "camera_intrinsics": torch.stack([item['camera_intrinsics'] for item in batch]),
         # label/ground truth
-        "translation": torch.stack([item['translation'] for item in batch]).to(device),
-        "rotation": torch.stack([item['rotation'] for item in batch]).to(device),
-        "quaternion": torch.stack([item['quaternion'] for item in batch]).to(device),
-        "bbox_base": torch.stack([item['bbox_base'] for item in batch]).to(device),
-        "obj_id": torch.stack([item['obj_id'] for item in batch]).to(device),
+        "translation": torch.stack([item['translation'] for item in batch]),
+        "rotation": torch.stack([item['rotation'] for item in batch]),
+        "quaternion": torch.stack([item['quaternion'] for item in batch]),
+        "bbox_base": torch.stack([item['bbox_base'] for item in batch]),
+        "obj_id": torch.stack([item['obj_id'] for item in batch]),
     }
      
     return batch_dict

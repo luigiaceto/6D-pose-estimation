@@ -94,6 +94,10 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
 
         # store everything instead of opening each time file, this can speed up computation
         self.ground_truths = self.extract_ground_truth()
+        
+        # Load object info and extract diameters
+        self.objects_info = self.load_obj_info()
+        
 
     def get_samples_id(self):
         """
@@ -175,7 +179,7 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
 
         return ground_truth
     
-    def load_config(self):
+    def load_obj_info(self):
         """
         Load YAML configuration files for object info for a specific folder.
         """
@@ -185,6 +189,12 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
             objects_info = yaml.load(f, Loader=yaml.CLoader)
 
         return objects_info
+    
+    def get_object_diameters(self):
+        """
+        Get the object diameters dictionary.
+        """
+        return {obj_id: info['diameter'] for obj_id, info in self.objects_info.items()}
 
     # define here some useful functions to access the data
     def load_image(self, img_path):
@@ -283,14 +293,14 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
 
         return { # la depth può servire per la baseline ???
             # sample
-            "sample_id": torch.tensor(self.samples[idx]).to(self.device),
+            "sample_id": torch.tensor(self.samples[idx]),
             "rgb": img, # per YOLO
-            "cropped_img": cropped_img.to(self.device), # per la baseline
+            "cropped_img": cropped_img, # per la baseline
             # label/ground truth
-            "translation": torch.tensor(translation).to(self.device),
-            "rotation": torch.tensor(rotation).to(self.device),
-            "quaternion": torch.tensor(quaternion).to(self.device),
-            "bbox_base": torch.tensor(bbox_base).to(self.device),
-            "bbox_YOLO": torch.tensor(bbox_YOLO).to(self.device),
-            "obj_id": torch.tensor(obj_id).to(self.device),
+            "translation": torch.tensor(translation),
+            "rotation": torch.tensor(rotation),
+            "quaternion": torch.tensor(quaternion),
+            "bbox_base": torch.tensor(bbox_base),
+            "bbox_YOLO": torch.tensor(bbox_YOLO),
+            "obj_id": torch.tensor(obj_id),
         }
