@@ -74,7 +74,7 @@ def evaluate(
     print(f"Device: {device}\n")
     
     # Load checkpoint
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     cam_params = checkpoint['camera_params']
     
     # Pinhole model

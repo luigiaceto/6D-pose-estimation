@@ -220,7 +220,7 @@ def visualize_predictions(
     # Load models
     yolo_model = YOLO(yolo_checkpoint)
     
-    checkpoint = torch.load(pose_checkpoint, map_location=device)
+    checkpoint = torch.load(pose_checkpoint, map_location=device, weights_only=False)
     pose_model = ResNetPose(pretrained=False).to(device)
     pose_model.load_state_dict(checkpoint['model_state_dict'])
     pose_model.eval()
