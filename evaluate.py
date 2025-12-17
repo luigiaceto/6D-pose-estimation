@@ -200,7 +200,7 @@ def evaluate(
                     )
                     all_add.append(add * 100)  # m -> cm
     
-    # Risultati
+    # Risultati semplificati
     print("\n" + "="*60)
     print("EVALUATION RESULTS")
     print("="*60)
@@ -211,79 +211,28 @@ def evaluate(
     # Converti diametri da mm a cm per confronto
     all_diameters_cm = all_diameters_np / 10.0
     
-    # Calcola accuracy a diverse soglie
-    threshold_10 = all_diameters_cm * 0.1  # 10% del diametro
-    threshold_5 = all_diameters_cm * 0.05   # 5% del diametro
-    threshold_2 = all_diameters_cm * 0.02   # 2% del diametro
+    # Accuracy @ 10% diameter (metrica standard)
+    threshold_10 = all_diameters_cm * 0.1
+    accuracy = np.mean(all_add_np < threshold_10) * 100
     
-    acc_10 = np.mean(all_add_np < threshold_10) * 100
-    acc_5 = np.mean(all_add_np < threshold_5) * 100
-    acc_2 = np.mean(all_add_np < threshold_2) * 100
-    
-    print(f"\n ADD ACCURACY (% predictions below threshold):")
-    print(f"  @ 10% diameter: {acc_10:.2f}% ← STANDARD METRIC")
-    print(f"  @ 5% diameter:  {acc_5:.2f}%")
-    print(f"  @ 2% diameter:  {acc_2:.2f}%")
+    print(f"\n📊 MODEL ACCURACY: {accuracy:.2f}%")
+    print(f"   (predictions within 10% of object diameter)\n")
     
     # Interpretazione
-    print(f"\Performance Level:")
-    if acc_10 >= 80:
-        print(f" EXCELLENT (≥80%)")
-    elif acc_10 >= 60:
-        print(f"GOOD (60-80%)")
-    elif acc_10 >= 40:
-        print(f"MODERATE (40-60%)")
-    elif acc_10 >= 20:
-        print(f"WEAK (20-40%)")
+    if accuracy >= 80:
+        level = "EXCELLENT"
+    elif accuracy >= 60:
+        level = "GOOD"
+    elif accuracy >= 40:
+        level = "MODERATE"
     else:
-        print(f"POOR (<20%)")
+        level = "POOR"
+    print(f"Performance Level: {level}\n")
     
-    if all_add:
-        print(f"\nADD Mean Error (all objects):")
-        print(f"  Mean: {np.mean(all_add):.2f} cm")
-        print(f"  Median: {np.median(all_add):.2f} cm")
-        print(f"  Std Dev: {np.std(all_add):.2f} cm")
-    
-    if all_add_s:
-        non_sym_add = [all_add[i] for i, oid in enumerate(all_object_ids) if oid not in symmetric_objects]
-        if non_sym_add:
-            print(f"\n  ADD (non-symmetric only):")
-            print(f"    Mean: {np.mean(non_sym_add):.2f} cm")
-        
-        sym_add = [all_add_s[i] for i in range(len(all_add_s))]
-        if sym_add:
-            print(f"\n  ADD-S (symmetric only):")
-            print(f"    Mean: {np.mean(sym_add):.2f} cm")
-    
-    print(f"\nRotation Error:")
-    print(f"  Mean: {np.mean(all_rot_errors):.2f}°")
-    print(f"  Median: {np.median(all_rot_errors):.2f}°")
-    print(f"  % < 5°:  {np.mean(np.array(all_rot_errors) < 5) * 100:.1f}%")
-    print(f"  % < 10°: {np.mean(np.array(all_rot_errors) < 10) * 100:.1f}%")
-    
-    print(f"\n Translation Error:")
-    print(f"  Mean: {np.mean(all_trans_errors):.2f} cm")
-    print(f"  Median: {np.median(all_trans_errors):.2f} cm")
-    print(f"  % < 2 cm:  {np.mean(np.array(all_trans_errors) < 2) * 100:.1f}%")
-    print(f"  % < 5 cm:  {np.mean(np.array(all_trans_errors) < 5) * 100:.1f}%")
-    
-    print(f"\n Per-Object Breakdown:")
-    unique_objs = sorted(set(all_object_ids))
-    
-    for obj_id in unique_objs:
-        obj_indices = [i for i, o in enumerate(all_object_ids) if o == obj_id]
-        obj_add = [all_add[i] for i in obj_indices]
-        obj_rot = [all_rot_errors[i] for i in obj_indices]
-        obj_diameter = all_diameters[obj_id] / 10.0  # mm → cm
-        
-        obj_acc_10 = np.mean(np.array(obj_add) < (obj_diameter * 0.1)) * 100
-        
-        sym_marker = " (SYM)" if obj_id in symmetric_objects else ""
-        print(f"  Object {obj_id:2d}{sym_marker}: "
-              f"ADD={np.mean(obj_add):5.2f}cm, "
-              f"Rot={np.mean(obj_rot):5.2f}°, "
-              f"Acc@10%={obj_acc_10:5.1f}% "
-              f"(n={len(obj_indices)})")
+    # Metriche essenziali
+    print(f"Mean Rotation Error:    {np.mean(all_rot_errors):6.2f}°")
+    print(f"Mean Translation Error: {np.mean(all_trans_errors):6.2f} cm")
+    print(f"Mean ADD Error:         {np.mean(all_add):6.2f} cm")
     
     print("\n" + "="*60)
 
