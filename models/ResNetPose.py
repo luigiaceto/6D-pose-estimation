@@ -22,10 +22,10 @@ class ResNetPose(nn.Module):
         super(ResNetPose, self).__init__()
         
         # ResNet18 backbone
-        resnet = models.resnet18(pretrained=pretrained)
+        resnet = models.resnet50(pretrained=pretrained)
         self.backbone = nn.Sequential(*list(resnet.children())[:-1])  # Remove FC
         
-        feature_dim = 512
+        feature_dim = 2048
         
         # Rotation head: predice SOLO quaternion (w, x, y, z)
         self.quaternion_head = nn.Sequential(

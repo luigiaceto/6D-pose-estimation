@@ -396,6 +396,5 @@ if __name__ == "__main__":
     # Esempio
     visualize_predictions(
         image_path="./datasets/linemod/DenseFusion/Linemod_preprocessed/data/04/rgb/0010.png",
-        output_path="./visualization_result.png",
         device='cuda'
     )
