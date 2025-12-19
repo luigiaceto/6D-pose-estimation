@@ -210,9 +210,7 @@ def train(
                 'optimizer_state_dict': optimizer.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
                 'lr': lr,
-                'val_loss': avg_val_loss,
-                'image_mean': train_dataset.image_mean,
-                'image_std': train_dataset.image_std
+                'val_loss': avg_val_loss
             }, os.path.join(checkpoint_dir, 'best_pose_model.pt'))
             print(f"✓ Saved best model")
     
