@@ -3,11 +3,16 @@ import shutil
 from ultralytics import YOLO
 
 
-def train_YOLO(path: str = None, epochs: int = None, batch_size: int = None, device = torch.device("cpu"), IMG_SIZE: int = None):
+def train_YOLO(path: str = None, epochs: int = None, batch_size: int = None, IMG_SIZE: int = None, device = torch.device("cpu")):
     """
     Finetune YOLO model on LineMOD.
     After training evaluate (in 'evaluate_YOLO.py') on validation set by returning metrics like mAP.
     Save model to checkpoints.
+
+    Nota:
+    YOLO non ha bisogno di nessun oggetto DataSet o DataLoader, gestisce tutto internamente.
+    Basta fornigli il file yml e strutturare la cartella che contiene il dataset in una certa
+    maniera.
     """
     
     # se 'yolo11n.pt' (i pesi pre-addestrati) non sono già dentro 'checkpoints/' allora verranno scaricati sul momento
@@ -21,6 +26,7 @@ def train_YOLO(path: str = None, epochs: int = None, batch_size: int = None, dev
         batch=batch_size,
         device=device,
         imgsz=IMG_SIZE,
+
         # data augmentation
         hsv_h=0.1,
         hsv_s=0.1,

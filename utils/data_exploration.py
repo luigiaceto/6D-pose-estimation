@@ -8,6 +8,7 @@ import matplotlib.patches as patches
 from typing import Tuple
 from data.CustomDatasetPose import IMG_WIDTH, IMG_HEIGHT
 
+
 def load_image(label: int, object: int):
     """
     Starting from 6DPose_Estimation plot image given label and objectId.

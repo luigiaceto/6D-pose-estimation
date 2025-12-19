@@ -11,26 +11,25 @@ import torchvision.transforms as transforms
 IMG_WIDTH = 640
 IMG_HEIGHT = 480
 
-class CustomDatasetPose(Dataset): # used to load and preprocess data
-    def __init__(self, dataset_root, split='train', train_ratio=0.7, seed=42, device=torch.device("cpu"), cam_K=None, img_mean=None, img_std=None):
+class CustomDatasetPose(Dataset):
+    def __init__(self, dataset_root, split='train', train_ratio=0.7, seed=42, cam_K=None):
         """
         Args:
             dataset_root (str): Path to the dataset directory.
             split (str): 'train', 'validation' or 'test'.
             train_ratio (float): Percentage of data used for training (default 70%).
             seed (int): Random seed for reproducibility.
-            device
-            camera intrinsics
-            image mean
-            image standard deviation
+            camera intrinsics:
+            image mean:
+            image standard deviation:
 
-        Lavora sia per YOLO che per il modello di 6D pose estimation basilare (che usa solo immagini RGB).
+        Carica e preprocessa i dati.
+        Serve al modello di 6D pose estimation basilare (che usa solo immagini RGB).
         """
         self.dataset_root = dataset_root
         self.split = split
         self.train_ratio = train_ratio
         self.seed = seed
-        self.device = device
         self.camera_intrinsics = [cam_K[0], cam_K[4], cam_K[2], cam_K[5]] # ci serve ???
 
         # Get list of all samples (folder_id, sample_id)
@@ -59,38 +58,27 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
         else:
             self.samples = self.test_samples
 
-        # find mean and standard deviation of images, if not given as parameter. In training non si forniscono.
-        if (img_mean is not None and img_std is not None):
-            self.image_mean = img_mean
-            self.image_std = img_std
-        else:
-            mean, std = self.findMeanStd(self.train_samples)
-            self.image_mean = mean.tolist()
-            self.image_std = std.tolist()
+        self.image_mean = torch.tensor([0.485, 0.456, 0.406])
+        self.image_std = torch.tensor([0.229, 0.224, 0.225])
 
         # Define image transformations for the baseline
         if self.split == 'train':
-            self.transform_img = transforms.Compose([
-                                transforms.ToTensor(),  # convert to float32
-                                # transforms.Normalize(mean=self.image_mean, std=self.image_std) # YOLO fa la normalizzazione automatica
-                            ])
+            self.transform_img = transforms.ToTensor()
 
             self.transform_crop = transforms.Compose([
-                                transforms.ColorJitter(brightness=0.3, contrast=0.2, saturation=0.2, hue=0.05),
-                                transforms.RandomGrayscale(p=0.1),
-                                transforms.RandomApply([transforms.GaussianBlur(kernel_size=3)], p=0.1),
-                                transforms.ToTensor(),
-                                transforms.Normalize(mean=self.image_mean, std=self.image_std) # normalize images according to the values found
-                            ])
+                transforms.ColorJitter(brightness=0.3, contrast=0.2, saturation=0.2, hue=0.05),
+                transforms.RandomGrayscale(p=0.1),
+                transforms.RandomApply([transforms.GaussianBlur(kernel_size=3)], p=0.1),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=self.image_mean, std=self.image_std)
+            ])
         else:
-            self.transform_img = transforms.Compose([
-                                transforms.ToTensor(),
-                            ])
+            self.transform_img = transforms.ToTensor()
 
             self.transform_crop = transforms.Compose([
-                                transforms.ToTensor(),
-                                transforms.Normalize(mean=self.image_mean, std=self.image_std)
-                            ])
+                transforms.ToTensor(),
+                transforms.Normalize(mean=self.image_mean, std=self.image_std)
+            ])
 
         # store everything instead of opening each time file, this can speed up computation
         self.ground_truths = self.extract_ground_truth()
@@ -119,36 +107,6 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
                 sample_ids = sorted([int(f.split('.')[0]) for f in os.listdir(folder_path) if f.endswith('.png')])
                 samples.extend([(folder_id, sid) for sid in sample_ids])  # store (folder_id, sample_id)
         return samples, folder_names
-    
-    def findMeanStd(self, train_samples):
-        """
-        Given dataset root and training samples in the format (folder_id, sample_id), compute
-        mean and standard deviation.
-        """
-
-        # transform to tensor [C, H, W]
-        to_tensor = transforms.ToTensor()
-
-        # initialize sum
-        sum_rgb = torch.zeros(3)
-        sum_sq_rgb = torch.zeros(3)
-        n_pixels = 0
-
-        for el in train_samples:
-            # get image
-            image_path = os.path.join(self.dataset_root, 'data', f"{el[0]:02d}", "rgb", f"{el[1]:04d}.png")
-            img = Image.open(image_path).convert('RGB') # ensure channel order is RGB
-            img_tensor = to_tensor(img)  # shape: [3, H, W]
-            # add
-            sum_rgb += img_tensor.sum(dim=[1, 2]) # sum over H and W, so for each channel a value
-            sum_sq_rgb += (img_tensor ** 2).sum(dim=[1, 2])
-            n_pixels += img_tensor.shape[1] * img_tensor.shape[2]
-        
-        # compute mean
-        mean = sum_rgb / n_pixels
-        std = torch.sqrt((sum_sq_rgb / n_pixels) - (mean ** 2))
-
-        return mean, std
     
     def get_image_mean_std(self):
         return self.image_mean, self.image_std
@@ -190,13 +148,12 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
 
         return objects_info
     
-    def get_object_diameters(self):
+    def get_object_diameters(self): 
         """
         Get the object diameters dictionary.
         """
         return {obj_id: info['diameter'] for obj_id, info in self.objects_info.items()}
 
-    # define here some useful functions to access the data
     def load_image(self, img_path):
         """
         Load an RGB image.
@@ -212,21 +169,6 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
         x, y, w, h = bbox
         cropped_img = img.crop((x, y, x+w, y+h)) # give as input the coordinates for left, top, right, bottom
         return self.transform_crop(cropped_img)
-
-    # ci serve per la baseline ???
-    def load_depth(self, depth_path):
-        """
-        Load a depth image.
-        """
-        return cv2.imread(depth_path, cv2.IMREAD_UNCHANGED).astype(np.float32)
-
-    # ci serve per la baseline ???
-    def load_mask(self, path):
-        """
-        Load mask.
-        """
-        # load in grayscale mode
-        return cv2.imread(path, cv2.IMREAD_GRAYSCALE).astype(np.uint8)
 
     def load_6d_pose(self, folder_id: int = None, sample_id: int = None):
         """
@@ -291,16 +233,18 @@ class CustomDatasetPose(Dataset): # used to load and preprocess data
 
         cropped_img, translation, rotation, quaternion, bbox_base, obj_id, bbox_YOLO = self.load_6d_pose(folder_id, sample_id)
 
-        return { # la depth può servire per la baseline ???
+        return {
             # sample
             "sample_id": torch.tensor(self.samples[idx]),
-            "rgb": img, # per YOLO
-            "cropped_img": cropped_img, # per la baseline
+            "cropped_img": cropped_img, # input della ResNet50 della baseline
+            "rgb": img,
+
             # label/ground truth
+            "obj_id": torch.tensor(obj_id),
             "translation": torch.tensor(translation),
             "rotation": torch.tensor(rotation),
             "quaternion": torch.tensor(quaternion),
             "bbox_base": torch.tensor(bbox_base),
-            "bbox_YOLO": torch.tensor(bbox_YOLO),
-            "obj_id": torch.tensor(obj_id),
+            "bbox_YOLO": torch.tensor(bbox_YOLO), # bounding box gt in formato yolo
         }
+    

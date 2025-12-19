@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from utils.init import set_device
 
 
+# DA CAMBIARE IN LETTERBOX PADDING
 def rgb_collate_fn(batch):
     """  
     Trova le dimensioni massime nel batch per fare padding.
@@ -21,8 +22,6 @@ def rgb_collate_fn(batch):
     
     padded_cropped_imgs = []
     paddings = []
-
-    device = set_device()
     
     for item in batch:
         # --- symmetric padding for image ---
@@ -47,19 +46,21 @@ def rgb_collate_fn(batch):
     batch_dict = {
         # sample
         "sample_id": torch.stack([item['sample_id'] for item in batch]),
+        "cropped_img": torch.stack(padded_cropped_imgs), # si feedda questo alla ResNet
         "rgb": torch.stack([item['rgb'] for item in batch]),
-        "cropped_img": torch.stack(padded_cropped_imgs),
         "paddings":torch.stack(paddings),
+
         # label/ground truth
+        "obj_id": torch.stack([item['obj_id'] for item in batch]),
         "translation": torch.stack([item['translation'] for item in batch]),
         "rotation": torch.stack([item['rotation'] for item in batch]),
         "quaternion": torch.stack([item['quaternion'] for item in batch]),
         "bbox_base": torch.stack([item['bbox_base'] for item in batch]),
-        "bbox_YOLO": torch.stack([item['bbox_YOLO'] for item in batch]), # utilizzata per YOLO
-        "obj_id": torch.stack([item['obj_id'] for item in batch]),
+        "bbox_YOLO": torch.stack([item['bbox_YOLO'] for item in batch]) # bbox gt in formato YOLO
     }
 
     return batch_dict
+
 
 def rgbd_collate_fn(batch):
     """

@@ -16,23 +16,14 @@ class PinholeCamera:
         Y = (v - cy) * Z / fy
     """
     
-    def __init__(self, fx, fy, cx, cy):
+    def __init__(self, cam_k):
         """
-        Args:
-            fx, fy: Focal lengths in pixels
-            cx, cy: Principal point coordinates
+        
         """
-        self.fx = fx
-        self.fy = fy
-        self.cx = cx
-        self.cy = cy
+        self.fx, self.fy, self.cx, self.cy = cam_k[0], cam_k[4], cam_k[2], cam_k[5]
         
         # Camera intrinsics matrix K
-        self.K = np.array([
-            [fx, 0, cx],
-            [0, fy, cy],
-            [0, 0, 1]
-        ], dtype=np.float32)
+        self.K = cam_k
     
     def project_3d_to_2d(self, points_3d):
         """

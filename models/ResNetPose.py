@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torchvision.models as models
+import torch.nn.functional as F
 
 
 class ResNetPose(nn.Module):
@@ -17,26 +18,32 @@ class ResNetPose(nn.Module):
     3. Z = (diametro_reale * focal) / diametro_pixels (pinhole formula)
     4. (u,v,Z) -> (X,Y,Z) con pinhole unprojection
     """
-    
-    def __init__(self, pretrained=True, dropout=0.3):
+
+    def __init__(self):
         super(ResNetPose, self).__init__()
         
-        # ResNet18 backbone
-        resnet = models.resnet50(pretrained=pretrained)
-        self.backbone = nn.Sequential(*list(resnet.children())[:-1])  # Remove FC
-        
+        # ResNet50 backbone
+        resnet = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
         feature_dim = 2048
+
+        # Rimuoviamo l'ultimo layer ovvero la classification head
+        self.backbone = nn.Sequential(*list(resnet.children())[:-1])
         
-        # Rotation head: predice SOLO quaternion (w, x, y, z)
-        self.quaternion_head = nn.Sequential(
-            nn.Linear(feature_dim, 256),
+        # Setup della testa 
+        # Riduzione graduale: 2048 -> 1024 -> 256 -> 4
+        # Include BatchNorm e Dropout leggero (0.1)
+        self.fc_layers_r = nn.Sequential(
+            nn.Linear(feature_dim, 1024),
+            nn.BatchNorm1d(1024),
             nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(256, 128),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(128, 4)  # quaternion (w, x, y, z)
+            nn.Dropout(0.1),
+
+            nn.Linear(1024, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU()
         )
+
+        self.quaternion_head = nn.Linear(256, 4)
     
     def forward(self, x):
         """
@@ -44,17 +51,21 @@ class ResNetPose(nn.Module):
             x: (B, 3, H, W) - batch di immagini RGB cropped
             
         Returns:
-            quaternion: (B, 4) - quaternion normalizzato (w, x, y, z)
+            quaternion: (B, 4) - quaternion normalizzato
         """
-        # Extract features
-        features = self.backbone(x)  # (B, 512, 1, 1)
-        features = features.view(features.size(0), -1)  # (B, 512)
+        # Estrazione Feature
+        x = self.backbone(x)                 # Output: (B, 2048, 1, 1)
+        features = x.view(x.size(0), -1)     # Flatten: (B, 2048)
         
-        # Predict quaternion and normalize
-        quaternion = self.quaternion_head(features)
-        quaternion = quaternion / (torch.norm(quaternion, dim=1, keepdim=True) + 1e-8)
+        # Predizione Quaternione
+        # Passaggio attraverso i layer FC intermedi
+        x = self.fc_layers_r(features)
         
-        return quaternion
+        # Proiezione finale a 4 valori
+        quaternion = self.quaternion_head(x)
+        
+        # Normalizzazione L2 dei quaternioni
+        return F.normalize(quaternion, p=2, dim=1)
     
     def freeze_backbone(self):
         """Freeze ResNet backbone."""

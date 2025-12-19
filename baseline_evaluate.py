@@ -12,14 +12,11 @@ import os
 import torch
 import numpy as np
 import yaml
-from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from models.ResNetPose import ResNetPose, quaternion_to_rotation_matrix
 from models.PinholeCamera import PinholeCamera
 from models.losses import compute_add_metric, compute_add_s_metric
-from data.CustomDatasetPose import CustomDatasetPose
-from data.DataLoaderCollating import rgb_collate_fn
 
 
 def load_model_points(dataset_root, obj_id):
@@ -62,59 +59,28 @@ def compute_translation_error(pred_t, gt_t):
 
 
 def evaluate(
+    dataset_root,
+    test_dataset,
+    test_loader,
+    cam_k,
     checkpoint_path='./checkpoints/best_pose_model.pt',
-    dataset_root="./datasets/linemod/DenseFusion/Linemod_preprocessed",
-    batch_size=16,
     device='cuda'
 ):
     """
-    Evaluation del modello.
+    Evaluation del modello baseline.
     """
-    device = torch.device(device if torch.cuda.is_available() else 'cpu')
-    print(f"Device: {device}\n")
     
-    # Load checkpoint
+    # Model & load checkpoint
+    model = ResNetPose().to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    cam_params = checkpoint['camera_params']
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.eval()
     
     # Pinhole model
-    pinhole = PinholeCamera(
-        cam_params['fx'], cam_params['fy'],
-        cam_params['cx'], cam_params['cy']
-    )
-    
-    # Dataset
-    cam_K = np.array([
-        cam_params['fx'], 0, cam_params['cx'],
-        0, cam_params['fy'], cam_params['cy'],
-        0, 0, 1
-    ], dtype=np.float32)
-    
-    test_dataset = CustomDatasetPose(
-        dataset_root=dataset_root,
-        split='test',
-        train_ratio=0.7,
-        seed=42,
-        device=device,
-        cam_K=cam_K,
-        img_mean=checkpoint['image_mean'],
-        img_std=checkpoint['image_std']
-    )
-    
-    test_loader = DataLoader(
-        test_dataset, batch_size=batch_size, shuffle=False,
-        num_workers=4, collate_fn=rgb_collate_fn, pin_memory=True
-    )
-    
-    print(f"Test samples: {len(test_dataset)}\n")
+    pinhole = PinholeCamera(cam_k)
     
     # Get object diameters
     object_diameters = test_dataset.get_object_diameters()
-    
-    # Model
-    model = ResNetPose(pretrained=False).to(device)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model.eval()
     
     # Metriche
     symmetric_objects = [2, 10]  # eggbox, glue
@@ -131,15 +97,11 @@ def evaluate(
     with torch.no_grad():
         for batch in tqdm(test_loader):
             cropped_img = batch['cropped_img'].to(device)
-            gt_quaternion = batch['quaternion'].to(device)
             gt_translation = batch['translation'].to(device)
             gt_rotation = batch['rotation'].to(device)
             bbox_base = batch['bbox_base'].to(device)
             obj_id = batch['obj_id'].to(device).long()
             obj_ids = obj_id.cpu().numpy()
-            
-            # Forward: ResNet predice SOLO quaternion
-            pred_quaternion = model(cropped_img)  # (B, 4)
             
             # Calcola translation da bbox + diametro (come in train.py)
             bbox_xyxy = torch.stack([
@@ -162,7 +124,7 @@ def evaluate(
             depth = pinhole.compute_depth_from_bbox(bbox_xyxy, batch_diameters)
             pred_translation = pinhole.unproject_2d_to_3d(center_2d_pixels, depth)
             
-            # Rotation matrix
+            pred_quaternion = model(cropped_img)  # (B, 4)
             pred_rotation = quaternion_to_rotation_matrix(pred_quaternion)
             
             # Converti a numpy
@@ -235,12 +197,3 @@ def evaluate(
     print(f"Mean ADD Error:         {np.mean(all_add):6.2f} cm")
     
     print("\n" + "="*60)
-
-
-if __name__ == "__main__":
-    evaluate(
-        checkpoint_path='./checkpoints/best_pose_model.pt',
-        dataset_root="./datasets/linemod/DenseFusion/Linemod_preprocessed",
-        batch_size=16,
-        device='cuda'
-    )

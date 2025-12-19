@@ -68,6 +68,7 @@ def quaternion_gt(input_path=None):
 
                     for pose in value:
                         quat_obj = quaternion.from_rotation_matrix(np.array(pose["cam_R_m2c"]).reshape(3,3))
+                        # salvo quaternioni nel formato [w, x, y, z]
                         quat_array = np.array([quat_obj.w, quat_obj.x, quat_obj.y, quat_obj.z], dtype=np.float32)
                         # convert array to tensor
                         quat = torch.tensor(quat_array)

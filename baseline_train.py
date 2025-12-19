@@ -11,7 +11,6 @@ Pipeline:
 import os
 import torch
 import torch.optim as optim
-from torch.utils.data import DataLoader
 import numpy as np
 from tqdm import tqdm
 import yaml
@@ -19,91 +18,56 @@ import yaml
 from models.ResNetPose import ResNetPose
 from models.PinholeCamera import PinholeCamera
 from models.losses import PoseLoss
-from data.CustomDatasetPose import CustomDatasetPose
-from data.DataLoaderCollating import rgb_collate_fn
 
 
 def train(
-    dataset_root="./datasets/linemod/DenseFusion/Linemod_preprocessed",
+    train_dataset,
+    train_loader,
+    val_loader,
+    cam_k,
+    checkpoint_dir='./checkpoints',
     epochs=50,
-    batch_size=16,
     lr=1e-4,
+    weight_dacay=1e-5,
     device='cuda',
-    freeze_epochs=5,
-    checkpoint_dir='./checkpoints'
+    freeze_epochs=5, # epoche dopo le quali scongelare la backbone (pretrainata)
 ):
     """
     Training del modello di pose estimation.
     """
-    device = torch.device(device if torch.cuda.is_available() else 'cpu')
-    print(f"Device: {device}")
     
     os.makedirs(checkpoint_dir, exist_ok=True)
     
-    # Camera intrinsics LINEMOD
-    #TODO: hardcoded, cambiare in modo che li prenda da CustomDataset
-    fx, fy, cx, cy = 572.41140, 573.57043, 325.26110, 242.04899
-    cam_K = np.array([fx, 0, cx, 0, fy, cy, 0, 0, 1], dtype=np.float32)
-    
-    # Pinhole camera model
-    pinhole = PinholeCamera(fx, fy, cx, cy)
-    
-    # Dataset
-    print("Loading datasets...")
-    train_dataset = CustomDatasetPose(
-        dataset_root=dataset_root,
-        split='train',
-        train_ratio=0.7,
-        seed=42,
-        device='cpu',
-        cam_K=cam_K
-    )
-    
-    val_dataset = CustomDatasetPose(
-        dataset_root=dataset_root,
-        split='validation',
-        train_ratio=0.7,
-        seed=42,
-        device='cpu',
-        cam_K=cam_K,
-        img_mean=train_dataset.image_mean,
-        img_std=train_dataset.image_std
-    )
-    
-    train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True,
-        num_workers=4, collate_fn=rgb_collate_fn, pin_memory=True
-    )
-    
-    val_loader = DataLoader(
-        val_dataset, batch_size=batch_size, shuffle=False,
-        num_workers=4, collate_fn=rgb_collate_fn, pin_memory=True
-    )
-    
-    print(f"Train samples: {len(train_dataset)}")
-    print(f"Val samples: {len(val_dataset)}")
+    pinhole = PinholeCamera(cam_k)
     
     # Get object diameters from dataset
     object_diameters = train_dataset.get_object_diameters()
     
     # Model
-    model = ResNetPose(pretrained=True, dropout=0.3).to(device)
+    model = ResNetPose().to(device)
     
     # Freeze backbone inizialmente
     if freeze_epochs > 0:
         model.freeze_backbone()
         print(f"Backbone frozen per {freeze_epochs} epochs")
     
-    # Loss e optimizer
     # lambda_translation=0.0 perché translation è calcolata geometricamente, non da ResNet!
     criterion = PoseLoss(lambda_rotation=1.0, lambda_translation=0.0)
-    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=5
+
+    optimizer = optim.Adam(
+        model.parameters(),
+        lr=lr, # iniziale
+        weight_decay=weight_dacay # regularization
+    )
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau( # agisce sull'optimizer
+        # tiene lr costante finchè la loss scende, poi lo dimezza
+        optimizer,
+        mode='min',
+        factor=0.5,
+        patience=5
     )
     
     best_val_loss = float('inf')
-    IMG_WIDTH, IMG_HEIGHT = 640, 480
     
     # Training loop
     for epoch in range(epochs):
@@ -112,7 +76,16 @@ def train(
         # Unfreeze backbone dopo freeze_epochs
         if epoch == freeze_epochs and freeze_epochs > 0:
             model.unfreeze_backbone()
-            optimizer = optim.Adam(model.parameters(), lr=lr/10, weight_decay=1e-5)
+            optimizer = optim.Adam(
+                model.parameters(),
+                lr=lr/10, # lr ora più basso
+                weight_decay=weight_dacay)
+            scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer,
+                mode='min',
+                factor=0.5,
+                patience=5
+            )
             print("Backbone unfrozen")
         
         # Train
@@ -145,10 +118,11 @@ def train(
             ], dim=1)
             
             # 3. Ottieni diametro per ogni oggetto nel batch
+            # POTREBBE RALLENTARE IL TRAINING
             batch_diameters = torch.tensor(
                 [object_diameters[int(oid)] for oid in obj_id.cpu()],
                 device=device, dtype=torch.float32
-            )
+            ) 
             
             # 4. Calcola depth Z usando pinhole formula
             depth = pinhole.compute_depth_from_bbox(bbox_xyxy, batch_diameters)
@@ -203,7 +177,7 @@ def train(
                     (bbox_xyxy[:, 0] + bbox_xyxy[:, 2]) / 2,
                     (bbox_xyxy[:, 1] + bbox_xyxy[:, 3]) / 2
                 ], dim=1)
-                
+
                 batch_diameters = torch.tensor(
                     [object_diameters[int(oid)] for oid in obj_id.cpu()],
                     device=device, dtype=torch.float32
@@ -234,22 +208,12 @@ def train(
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'lr': lr,
                 'val_loss': avg_val_loss,
                 'image_mean': train_dataset.image_mean,
-                'image_std': train_dataset.image_std,
-                'camera_params': {'fx': fx, 'fy': fy, 'cx': cx, 'cy': cy}
+                'image_std': train_dataset.image_std
             }, os.path.join(checkpoint_dir, 'best_pose_model.pt'))
             print(f"✓ Saved best model")
     
     print("\nTraining completed!")
-
-
-if __name__ == "__main__":
-    train(
-        dataset_root="./datasets/linemod/DenseFusion/Linemod_preprocessed",
-        epochs=50,
-        batch_size=16,
-        lr=1e-4,
-        device='cuda',
-        freeze_epochs=5
-    )

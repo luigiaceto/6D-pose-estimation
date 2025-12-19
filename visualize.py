@@ -198,6 +198,7 @@ def draw_axis_colored(img, R, t, K, scale=0.05, colors=None):
 
 
 def visualize_predictions(
+    cam_k,
     image_path = "./datasets/linemod/DenseFusion/Linemod_preprocessed/data/04/rgb/0000.png",
     yolo_checkpoint='./checkpoints/best.pt',
     pose_checkpoint='./checkpoints/best_pose_model.pt',
@@ -208,7 +209,6 @@ def visualize_predictions(
     """
     Pipeline completa: YOLO -> Crop -> Pose -> Visualizza GT e predizione con confronto numerico.
     """
-    device = torch.device(device if torch.cuda.is_available() else 'cpu')
     
     # Load object diameters
     dataset_root = "./datasets/linemod/DenseFusion/Linemod_preprocessed"
@@ -221,16 +221,12 @@ def visualize_predictions(
     yolo_model = YOLO(yolo_checkpoint)
     
     checkpoint = torch.load(pose_checkpoint, map_location=device, weights_only=False)
-    pose_model = ResNetPose(pretrained=False).to(device)
+    pose_model = ResNetPose().to(device)
     pose_model.load_state_dict(checkpoint['model_state_dict'])
     pose_model.eval()
     
     # Pinhole camera
-    cam_params = checkpoint['camera_params']
-    pinhole = PinholeCamera(
-        cam_params['fx'], cam_params['fy'],
-        cam_params['cx'], cam_params['cy']
-    )
+    pinhole = PinholeCamera(cam_k=cam_k)
     K = pinhole.get_intrinsics_matrix()
     
     # Image transforms
@@ -390,7 +386,6 @@ def visualize_predictions(
     plt.title('Green = Ground Truth | Cyan = Prediction', fontsize=14)
     plt.show()
     
-
 
 if __name__ == "__main__":
     # Esempio
