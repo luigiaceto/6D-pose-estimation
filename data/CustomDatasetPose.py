@@ -12,7 +12,7 @@ IMG_WIDTH = 640
 IMG_HEIGHT = 480
 
 class CustomDatasetPose(Dataset):
-    def __init__(self, dataset_root, split='train', train_ratio=0.7, seed=42, cam_K=None):
+    def __init__(self, dataset_root, split='train', train_ratio=0.8, seed=42, cam_K=None):
         """
         Args:
             dataset_root (str): Path to the dataset directory.
