@@ -50,7 +50,7 @@ def get_class_names(dataset_root):
     """
     folder_names = []
     for folder_id in range(1, 16):
-        folder_path = dataset_root / "data" / f"{folder_id:02d}" / "rgb"
+        folder_path = dataset_root + "/data/" + f"{folder_id:02d}" + "/rgb"
         if os.path.exists(str(folder_path)):
             folder_names.append(folder_id)
     return folder_names
