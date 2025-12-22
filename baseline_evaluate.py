@@ -96,7 +96,7 @@ def evaluate(
     IMG_WIDTH, IMG_HEIGHT = 640, 480
 
     # collect metrics per classe
-    per_class_metrics=per_class_metrics = defaultdict(list)
+    per_class_metrics= defaultdict(list)
 
     print("Evaluating...")
     with torch.no_grad():
