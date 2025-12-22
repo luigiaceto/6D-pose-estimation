@@ -14,6 +14,7 @@ import torch
 import numpy as np
 import yaml
 from tqdm import tqdm
+from collections import defaultdict
 
 from models.ResNetPose import ResNetPose, quaternion_to_rotation_matrix
 from models.PinholeCamera import PinholeCamera
@@ -95,7 +96,7 @@ def evaluate(
     IMG_WIDTH, IMG_HEIGHT = 640, 480
 
     # collect metrics per classe
-    per_class_metrics=[[] for _ in range(len(object_diameters))]
+    per_class_metrics=per_class_metrics = defaultdict(list)
 
     print("Evaluating...")
     with torch.no_grad():
@@ -207,7 +208,7 @@ def evaluate(
     print("\n" + "="*60)
 
     per_class_results=[]
-    for class_id, metrics in enumerate(per_class_metrics):
+    for class_id, metrics in per_class_metrics.items():
         if len(metrics) == 0:
             continue
 
