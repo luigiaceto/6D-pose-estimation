@@ -23,7 +23,7 @@ from models.losses import compute_add_metric, compute_add_rotation_only, compute
 
 def load_model_points(dataset_root, obj_id):
     """Carica corner points 3D del modello."""
-    models_info_path = str(dataset_root / "models" / "models_info.yml")
+    models_info_path = str(dataset_root+ "/models" + "/models_info.yml")
     with open(models_info_path, 'r') as f:
         models_info = yaml.load(f, Loader=yaml.CLoader)
     
@@ -65,7 +65,7 @@ def evaluate(
     test_dataset,
     test_loader,
     cam_k,
-    checkpoint_path=str(Path("checkpoints") / "best_pose_model.pt"), 
+    checkpoint_path=str(Path("checkpoints") + "/best_pose_model.pt"), 
     device='cuda'
 ):
     """
@@ -250,5 +250,5 @@ def evaluate(
         'add_rot_only_mean': add_rotation_only_errors.mean(),
         'accuracy_10p_rot_only': accuracy_rot_only
         })
-        
+
     return per_class_results
