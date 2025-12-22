@@ -17,7 +17,7 @@ from collections import defaultdict
 
 from models.ResNetPose import ResNetPose, quaternion_to_rotation_matrix
 from models.PinholeCamera import PinholeCamera
-from models.losses import compute_add_metric, compute_add_s_metric
+from models.losses import compute_add_metric, compute_add_rotation_only, compute_add_s_metric, compute_add_s_rotation_only
 
 
 def load_model_points(dataset_root, obj_id):
@@ -86,6 +86,7 @@ def evaluate(
     # Metriche
     symmetric_objects = [2, 10]  # eggbox, glue
     all_add = []
+    all_add_rotation_only = []
     all_add_s = []
     all_rot_errors = []
     all_trans_errors = []
@@ -156,28 +157,28 @@ def evaluate(
                 
                 
                 # ADD o ADD-S
-                try:
-                    if obj_id in symmetric_objects:
-                        add_s = compute_add_s_metric(
-                            pred_R[i], pred_t[i], gt_R[i], gt_t[i], model_points
-                        )
-                        all_add_s.append(add_s * 100)  # m -> cm
-                        all_add.append(add_s * 100)  # Per calcolo complessivo
-                        per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add_s * 100 })
-                    else:
-                        add = compute_add_metric(
-                            pred_R[i], pred_t[i], gt_R[i], gt_t[i], model_points
-                        )
-                        all_add.append(add * 100)  # m -> cm
-                        per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add * 100 })
-                except IndexError as e:
-                    print(f"--- CRASH DETECTED ---")
-                    print(f"Indice i attuale: {i}")
-                    print(f"ID oggetto: {obj_id}")
-                    print ("per class metrics:", per_class_metrics)
-                    print(f"Lunghezza object_diameters: {len(object_diameters)}")
-                    print(f"Shape pred_R: {pred_R.shape}")
-                    raise e
+                
+                if obj_id in symmetric_objects:
+                    add_s = compute_add_s_metric(
+                        pred_R[i], pred_t[i], gt_R[i], gt_t[i], model_points
+                    )
+                    all_add_s.append(add_s * 100)  # m -> cm
+                    all_add.append(add_s * 100)  # Per calcolo complessivo
+                    add_s_rotation_only = compute_add_s_rotation_only(
+                        pred_R[i], gt_R[i], model_points
+                    )
+                    all_add_rotation_only.append(add_s_rotation_only * 100)
+                    per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add_s * 100, 'add_rotation_only': add_s_rotation_only * 100 })
+                else:
+                    add = compute_add_metric(
+                        pred_R[i], pred_t[i], gt_R[i], gt_t[i], model_points
+                    )
+                    all_add.append(add * 100)  # m -> cm
+                    add_rotation_only = compute_add_rotation_only(
+                        pred_R[i], gt_R[i], model_points
+                    )
+                    all_add_rotation_only.append(add_rotation_only * 100)
+                    per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add * 100, 'add_rotation_only': add_rotation_only * 100 })
         
     # Risultati semplificati
     print("\n" + "="*60)
@@ -186,7 +187,8 @@ def evaluate(
     
     all_add_np = np.array(all_add)
     all_diameters_np = np.array(all_diameters)
-    
+    all_add_rotation_only_np = np.array(all_add_rotation_only)
+
     # Converti diametri da mm a cm per confronto
     all_diameters_cm = all_diameters_np / 10.0
     
@@ -212,6 +214,10 @@ def evaluate(
     print(f"Mean Rotation Error:    {np.mean(all_rot_errors):6.2f}°")
     print(f"Mean Translation Error: {np.mean(all_trans_errors):6.2f} cm")
     print(f"Mean ADD Error:         {np.mean(all_add):6.2f} cm")
+    print(f"Mean ADD-Rot-Only Error:{np.mean(all_add_rotation_only):6.2f} cm")
+
+    accuracy_rot_only = np.mean(all_add_rotation_only_np < threshold_10) * 100
+    print(f"Accuracy @10% Diam (Rot-Only): {accuracy_rot_only:.2f}%")
     
     print("\n" + "="*60)
 
@@ -223,11 +229,15 @@ def evaluate(
         rot_errors = np.array([m['rotation'] for m in metrics])
         trans_errors = np.array([m['translation'] for m in metrics])
         add_errors = np.array([m['add'] for m in metrics])
+        add_rotation_only_errors = np.array([m['add_rotation_only'] for m in metrics])
         
         # accuracy @ 10% diameter
         class_diameter_cm = object_diameters[class_id] / 10.0
         threshold = 0.1 * class_diameter_cm
         accuracy = np.mean(add_errors < threshold) * 100
+
+        # accuracy @ 10% diameter (rot only)
+        accuracy_rot_only = np.mean(add_rotation_only_errors < threshold) * 100
         
         per_class_results.append({
         'class_id': class_id,
@@ -235,6 +245,9 @@ def evaluate(
         'accuracy_10p': accuracy,
         'rot_mean': rot_errors.mean(),
         'trans_mean': trans_errors.mean(),
-        'add_mean': add_errors.mean()
+        'add_mean': add_errors.mean(),
+        'add_rot_only_mean': add_rotation_only_errors.mean(),
+        'accuracy_10p_rot_only': accuracy_rot_only
         })
+        
     return per_class_results
