@@ -65,7 +65,7 @@ def evaluate(
     test_dataset,
     test_loader,
     cam_k,
-    checkpoint_path=str(Path("checkpoints") + "/best_pose_model.pt"), 
+    checkpoint_path=str(Path("checkpoints") / "best_pose_model.pt"), 
     device='cuda'
 ):
     """
