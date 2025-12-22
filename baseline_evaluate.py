@@ -9,6 +9,7 @@ Calcola metriche:
 """
 
 import os
+from pathlib import Path
 import torch
 import numpy as np
 import yaml
@@ -22,7 +23,7 @@ from models.losses import compute_add_metric, compute_add_s_metric
 
 def load_model_points(dataset_root, obj_id):
     """Carica corner points 3D del modello."""
-    models_info_path = os.path.join(dataset_root, 'models', 'models_info.yml')
+    models_info_path = str(dataset_root / "models" / "models_info.yml")
     with open(models_info_path, 'r') as f:
         models_info = yaml.load(f, Loader=yaml.CLoader)
     
@@ -64,7 +65,7 @@ def evaluate(
     test_dataset,
     test_loader,
     cam_k,
-    checkpoint_path='./checkpoints/best_pose_model.pt',
+    checkpoint_path=str(Path("checkpoints") / "best_pose_model.pt"), 
     device='cuda'
 ):
     """
@@ -143,7 +144,7 @@ def evaluate(
                 obj_id = int(obj_ids[i])
                 
                 # Carica model points
-                model_points = load_model_points(dataset_root, obj_id)
+                model_points = load_model_points(str(dataset_root), obj_id)
                 
                 # Rotation e translation errors
                 rot_err = compute_rotation_error(pred_R[i], gt_R[i])

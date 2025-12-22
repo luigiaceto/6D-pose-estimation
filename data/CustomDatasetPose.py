@@ -1,7 +1,6 @@
 import os
 import yaml
 import torch
-import cv2
 from torch.utils.data import Dataset
 from PIL import Image
 import numpy as np
@@ -17,14 +16,14 @@ class CustomDatasetPose(Dataset):
         Args:
             dataset_root (str): Path to the dataset directory.
             split (str): 'train', 'validation' or 'test'.
-            train_ratio (float): Percentage of data used for training (default 70%).
+            train_ratio (float): Percentage of data used for training.
             seed (int): Random seed for reproducibility.
             camera intrinsics:
             image mean:
             image standard deviation:
 
         Carica e preprocessa i dati.
-        Serve al modello di 6D pose estimation basilare (che usa solo immagini RGB).
+        Serve al modello di 6D pose estimation baseline (che usa solo immagini RGB).
         """
         self.dataset_root = dataset_root
         self.split = split
@@ -32,19 +31,19 @@ class CustomDatasetPose(Dataset):
         self.seed = seed
         self.camera_intrinsics = [cam_K[0], cam_K[4], cam_K[2], cam_K[5]] # ci serve ???
 
-        # Get list of all samples (folder_id, sample_id)
+        # Get list of all samples as (folder_id, sample_id)
         self.samples, self.folder_names = self.get_all_samples()
 
         if not self.samples:
-            raise ValueError(f"No samples found in {self.dataset_root}. Check the dataset path and structure.")
+            raise ValueError(f"No samples found in {str(self.dataset_root)}. Check the dataset path and structure.")
 
-        # Split into [training set] and [validation set + test set]
+        # Split dataset into [training set] and [validation set + test set]
         labels = [elem[0] for elem in self.samples]
         self.train_samples, self.val_test_samples = train_test_split(
             self.samples, train_size=self.train_ratio, random_state=self.seed, stratify=labels
         )
 
-        # split [validation set + test set] (by default 30% of the original dataset) into [validation set] and [test set]
+        # split [validation set + test set] into [validation set] and [test set]
         labels = [elem[0] for elem in self.val_test_samples]
         self.val_samples, self.test_samples = train_test_split(
             self.val_test_samples, train_size=0.5, random_state=self.seed, stratify=labels
@@ -66,18 +65,32 @@ class CustomDatasetPose(Dataset):
             self.transform_img = transforms.ToTensor()
 
             self.transform_crop = transforms.Compose([
-                transforms.ColorJitter(brightness=0.3, contrast=0.2, saturation=0.2, hue=0.05),
+                transforms.ColorJitter(
+                    brightness=0.3,
+                    contrast=0.2,
+                    saturation=0.2,
+                    hue=0.05
+                ),
                 transforms.RandomGrayscale(p=0.1),
-                transforms.RandomApply([transforms.GaussianBlur(kernel_size=3)], p=0.1),
+                transforms.RandomApply(
+                    [transforms.GaussianBlur(kernel_size=3)],
+                    p=0.1
+                ),
                 transforms.ToTensor(),
-                transforms.Normalize(mean=self.image_mean, std=self.image_std)
+                transforms.Normalize(
+                    mean=self.image_mean,
+                    std=self.image_std
+                )
             ])
         else:
             self.transform_img = transforms.ToTensor()
 
             self.transform_crop = transforms.Compose([
                 transforms.ToTensor(),
-                transforms.Normalize(mean=self.image_mean, std=self.image_std)
+                transforms.Normalize(
+                    mean=self.image_mean,
+                    std=self.image_std
+                )
             ])
 
         # store everything instead of opening each time file, this can speed up computation
@@ -100,7 +113,7 @@ class CustomDatasetPose(Dataset):
         folder_names = []
         samples = []
         for folder_id in range(1, 16):  # Assuming folders are named 01 02 ... 15
-            folder_path = os.path.join(self.dataset_root, 'data', f"{folder_id:02d}", "rgb")
+            folder_path = str(self.dataset_root / "data" / f"{folder_id:02d}" / "rgb")
             if os.path.exists(folder_path):
                 # get id of the images
                 folder_names.append(folder_id)
@@ -115,7 +128,7 @@ class CustomDatasetPose(Dataset):
         ground_truth = {}
         for elem in self.folder_names:
 
-            pose_file = os.path.join(self.dataset_root, f"{elem:02d}_gt.yml")
+            pose_file = str(self.dataset_root / f"{elem:02d}_gt.yml")
 
             with open(pose_file, 'r') as f:
                 pose_data = yaml.load(f, Loader=yaml.CLoader)
@@ -141,7 +154,8 @@ class CustomDatasetPose(Dataset):
         """
         Load YAML configuration files for object info for a specific folder.
         """
-        objects_info_path = os.path.join(self.dataset_root, 'models', f"models_info.yml")
+
+        objects_info_path = str(self.dataset_root / "models" / "models_info.yml")
 
         with open(objects_info_path, 'r') as f:
             objects_info = yaml.load(f, Loader=yaml.CLoader)
@@ -161,14 +175,34 @@ class CustomDatasetPose(Dataset):
         img = Image.open(img_path).convert("RGB")
         return self.transform_img(img)
 
+    # APPLICARE ANCHE RANDOM JITTER AL BBOX GROUND TRUTH?
     def load_cropped_image(self, img_path, bbox):
         """
-        Load an RGB image, crop.
+        Load an RGB image, crop it, resize/pad and return it.
         """
         img = Image.open(img_path).convert("RGB")
         x, y, w, h = bbox
+
+        # crop iniziale dell'immagine secondo il ground truth bounding box
         cropped_img = img.crop((x, y, x+w, y+h)) # give as input the coordinates for left, top, right, bottom
-        return self.transform_crop(cropped_img)
+
+        w_crop, h_crop = cropped_img.size
+        max_dim = max(w_crop, h_crop)
+
+        # creiamo una nuova immagine quadrata nera (o media dataset).
+        # Background nero (0,0,0) va bene se normalizzi dopo
+        square_img = Image.new('RGB', (max_dim, max_dim), (0, 0, 0))
+
+        # incolliamo l'immagine al centro (o in alto a sinistra, basta essere coerenti)
+        offset_x = (max_dim - w_crop) // 2
+        offset_y = (max_dim - h_crop) // 2
+        square_img.paste(cropped_img, (offset_x, offset_y))
+        
+        # resize alla dimensione di input della ResNet (es. 224).
+        # Importante: ora che è quadrata, il resize non deforma l'oggetto!
+        square_img = square_img.resize((224, 224), Image.BILINEAR)
+
+        return self.transform_crop(square_img)
 
     def load_6d_pose(self, folder_id: int = None, sample_id: int = None):
         """
@@ -183,7 +217,7 @@ class CustomDatasetPose(Dataset):
         # bbox is top left corner and width and height info, YOLO needs center coordinates and width and height
         obj_id = np.array(pose['obj_id'], dtype=np.float32) # [1] ---> label
         
-        cropped_img = self.load_cropped_image(os.path.join(self.dataset_root, 'data', f"{folder_id:02d}", "rgb", f"{sample_id:04d}.png"), bbox_base)
+        cropped_img = self.load_cropped_image(str(self.dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png"), bbox_base)
 
         # compute initial center
         x_min, y_min, width, height = np.array(pose['obj_bb'], dtype=np.float32)
@@ -227,7 +261,7 @@ class CustomDatasetPose(Dataset):
         """
         folder_id, sample_id = self.samples[idx] # both are integer
 
-        img_path = os.path.join(self.dataset_root, 'data', f"{folder_id:02d}", f"rgb/{sample_id:04d}.png")
+        img_path = str(self.dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png")
 
         img = self.load_image(img_path)
 
@@ -245,6 +279,6 @@ class CustomDatasetPose(Dataset):
             "rotation": torch.tensor(rotation),
             "quaternion": torch.tensor(quaternion),
             "bbox_base": torch.tensor(bbox_base),
-            "bbox_YOLO": torch.tensor(bbox_YOLO), # bounding box gt in formato yolo
+            "bbox_YOLO": torch.tensor(bbox_YOLO), # bounding box ground truth in formato yolo
         }
     

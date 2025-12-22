@@ -9,6 +9,7 @@ Pipeline:
 """
 
 import os
+from pathlib import Path
 import torch
 import torch.optim as optim
 import numpy as np
@@ -25,7 +26,7 @@ def train(
     train_loader,
     val_loader,
     cam_k,
-    checkpoint_dir='./checkpoints',
+    checkpoint_dir='checkpoints',
     epochs=50,
     lr=1e-4,
     weight_dacay=1e-5,
@@ -211,7 +212,7 @@ def train(
                 'scheduler_state_dict': scheduler.state_dict(),
                 'lr': lr,
                 'val_loss': avg_val_loss
-            }, os.path.join(checkpoint_dir, 'best_pose_model.pt'))
+            }, str(Path(checkpoint_dir) / "best_pose_model.pt"))
             print(f"✓ Saved best model")
-    
+            
     print("\nTraining completed!")
