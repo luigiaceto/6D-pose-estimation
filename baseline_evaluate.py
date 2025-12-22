@@ -170,7 +170,7 @@ def evaluate(
                         )
                         all_add.append(add * 100)  # m -> cm
                         per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add * 100 })
-                except Exception as e:
+                except IndexError as e:
                     print(f"--- CRASH DETECTED ---")
                     print(f"Indice i attuale: {i}")
                     print(f"ID oggetto: {obj_id}")
