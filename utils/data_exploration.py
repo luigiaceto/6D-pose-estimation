@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import yaml
 import numpy as np
 import torch
@@ -9,11 +10,11 @@ from typing import Tuple
 from data.CustomDatasetPose import IMG_WIDTH, IMG_HEIGHT
 
 
-def load_image(label: int, object: int):
+def load_image(dataset_root, label: int, object: int):
     """
     Starting from 6DPose_Estimation plot image given label and objectId.
     """
-    img_path = f"./datasets/linemod/DenseFusion/Linemod_preprocessed/data/{label:02d}/rgb/{object:04d}.png"
+    img_path = str(dataset_root / "data" / f"{label:02d}" / "rgb" / f"{object:04d}.png")
     img = Image.open(img_path).convert("RGB")
     plt.imshow(img)
     plt.show()
@@ -43,14 +44,14 @@ def get_camera_intrinsics(dataset_root):
         else:
             raise KeyError("La chiave 'cam_K' non è presente nel file YAML analizzato.")
     
-def get_class_names():
+def get_class_names(dataset_root):
     """
     Gets class names.
     """
     folder_names = []
     for folder_id in range(1, 16):
-        folder_path = os.path.join('./datasets/linemod/DenseFusion/Linemod_preprocessed/data', f"{folder_id:02d}", "rgb")
-        if os.path.exists(folder_path):
+        folder_path = dataset_root / "data" / f"{folder_id:02d}" / "rgb"
+        if os.path.exists(str(folder_path)):
             folder_names.append(folder_id)
     return folder_names
 
@@ -118,16 +119,16 @@ def load_dataset_distribution(counter_df, index_dict, number_classes):
     fig.supylabel("Labels")
     plt.subplots_adjust(left=0.07, wspace=0.1)
     plt.suptitle("Labels Distribution over the Training, Validation and Test sets")
-    plt.savefig("./images/YOLO_dataset_distribution.png")
+    plt.savefig(str(Path("images") / "YOLO_dataset_distribution.png"))
     plt.show()
 
-def load_depth_patch(path: str = None, folder: str = None, imageId: str = None, image=None):
+def load_depth_patch(dataset_root: str = None, folder: str = None, imageId: str = None, image=None):
     """
     Plots image with bounding box.    
     """
-
+    
     # Load the ground truth poses from the gt.yml file
-    with open(f"{path}/datasets/linemod/DenseFusion/Linemod_preprocessed/data/{folder}/gt.yml", 'r') as f:
+    with open(str(dataset_root / "data" / f"{folder}" / "gt.yml"), 'r') as f:
         pose_data = yaml.load(f, Loader=yaml.FullLoader)
     pose = pose_data[int(imageId)][0] # access image imageId (start counting from 0) and get first element (in case of multiple objects)
 

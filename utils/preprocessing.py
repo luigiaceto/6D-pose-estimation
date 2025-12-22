@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import yaml
 import shutil
 import quaternion
@@ -8,15 +9,18 @@ import pandas as pd
 from tqdm import tqdm
 
 
-def copy_gt_file(file_names: list = None):
+def copy_gt_file(dataset_root, file_names: list = None):
     """
     Trasloca i file che contengono le ground truth del dataset mettendoli
     nella cartella datasets/linemod/DenseFusion/Linemod_preprocessed, uno per classe di foto.
     """
     for file_name in file_names:
-        shutil.copy(f"./datasets/linemod/DenseFusion/Linemod_preprocessed/data/{file_name:02d}/gt.yml", f"./datasets/linemod/DenseFusion/Linemod_preprocessed/{file_name:02d}_gt.yml")
+        shutil.copy(
+            str(dataset_root / "data" / f"{file_name:02d}" / "gt.yml"),
+            str(dataset_root / f"{file_name:02d}_gt.yml")
+        )
 
-def change_02gt(path=None):
+def change_02gt(path):
     """
     Elimina dal file gt della seconda classe di foto le gt riguardanti gli
     oggetti che non sono quello di classe 2 propriamente. E' l'unico folder
@@ -51,12 +55,12 @@ def change_02gt(path=None):
             indent=2, # standard identation
         )
 
-def quaternion_gt(input_path=None):
+def quaternion_gt(input_path):
     """
     Add quaternion to ground truth file.
     """
     # for each ground truth file
-    for gt in os.scandir(input_path):
+    for gt in os.scandir(str(input_path)):
         if not gt.is_dir() and gt.name.endswith(('.yaml', '.yml')):
 
             with open(gt, 'r') as f:
@@ -81,9 +85,9 @@ def quaternion_gt(input_path=None):
                         
                     modified_data[key] = modified_poses
 
-                output_file = os.path.join(input_path, gt.name)
+                output_file = input_path / gt.name
 
-                with open(output_file, 'w') as f_output:
+                with open(str(output_file), 'w') as f_output:
                     yaml.dump(
                         modified_data,
                         f_output,
@@ -92,13 +96,14 @@ def quaternion_gt(input_path=None):
                         sort_keys=True
                     )
 
-def create_YOLO_yaml(path, folder_names):
+def create_YOLO_yaml(folder_names):
     """
     Crea il folder per YOLO che contiene lo yaml. Esso verrà usato come mappa
     da YOLO per localizzare i vari files.
     """
     # create a folder to contain the dataset for YOLO model
-    os.makedirs(f"{path}/datasets/linemod/YOLO/datasets", exist_ok=True)
+    path = Path("datasets") / "linemod" / "YOLO" / "datasets"
+    os.makedirs(str(path), exist_ok=True)
 
     # count number of distinct classes
     number_classes = len(folder_names)
@@ -118,18 +123,19 @@ def create_YOLO_yaml(path, folder_names):
     # create data.yaml (as class names use ids of the folder)
     content = f"""train: ./train/images\nval: ./val/images\ntest: ./test/images\n\nnc: {number_classes}\nnames: {names}"""
     # write to file
-    with open(f"{path}/datasets/linemod/YOLO/datasets/data.yaml", "w") as fout:
+    with open(str(path / "data.yml"), "w") as fout:
         fout.write(content)
     fout.close()
 
     return number_classes, class_names
 
-def create_dataset_YOLO(number_classes, train_samples, validation_samples, test_samples, index_dict, path, train_dataset):
+def create_dataset_YOLO(number_classes, train_samples, validation_samples, test_samples, index_dict, train_dataset):
     """
     Create images and labels in the YOLO folder created in the previous function.
     """
     # dataset = [train_samples, validation_samples, test_samples]
     folder_names = ["train", "val", "test"]
+    dataset_root = Path("datasets") / "linemod" / "DenseFusion" / "Linemod_preprocessed" / "data"
 
     # count also the number of instances of each class
     # classes = range(0, number_classes)
@@ -141,9 +147,12 @@ def create_dataset_YOLO(number_classes, train_samples, validation_samples, test_
             dataset = validation_samples
         else:
             dataset = test_samples
+
         print(f"------------------------------{folder_names[idx].upper()}------------------------------")
-        os.makedirs(f"{path}/datasets/linemod/YOLO/datasets/{folder_names[idx]}/images", exist_ok=True)
-        os.makedirs(f"{path}/datasets/linemod/YOLO/datasets/{folder_names[idx]}/labels", exist_ok=True)
+        yolo_path = Path("datasets") / "linemod" / "YOLO" / "datasets"
+        os.makedirs(str(yolo_path / f"{folder_names[idx]}" / "images"), exist_ok=True)
+        os.makedirs(str(yolo_path / f"{folder_names[idx]}" / "labels"), exist_ok=True)
+
         classCount = {label_object: 0 for label_object in index_dict.keys()} # initialize dictionary for counting
         total = 0 # used to normalize count
         for el in tqdm(dataset, desc="Moving..."):
@@ -151,9 +160,13 @@ def create_dataset_YOLO(number_classes, train_samples, validation_samples, test_
             _, _, _, _, _, obj_id, bbox = train_dataset.load_6d_pose(el[0], el[1])
             # copy image into the new folder
             # avoid overwriting the files, so concat also the name of the folderId to the destination file
-            shutil.copy(f"{path}/datasets/linemod/DenseFusion/Linemod_preprocessed/data/{el[0]:02d}/rgb/{el[1]:04d}.png", f"{path}/datasets/linemod/YOLO/datasets/{folder_names[idx]}/images/{el[0]:02d}_{el[1]:04d}.png")
+            shutil.copy(
+                str(dataset_root / f"{el[0]:02d}" / "rgb" / f"{el[1]:04d}.png"),
+                str(yolo_path / f"{folder_names[idx]}" / "images" / f"{el[0]:02d}_{el[1]:04d}.png")
+            )
+
             # create label file with the same name as the image
-            with open(f"{path}/datasets/linemod/YOLO/datasets/{folder_names[idx]}/labels/{el[0]:02d}_{el[1]:04d}.txt", "w") as fout:
+            with open(str(yolo_path / f"{folder_names[idx]}" / "labels" / f"{el[0]:02d}_{el[1]:04d}.txt"), "w") as fout:
                 # bbox is a list of values in the form of [x_center, y_center, width, height] and obj_id a list of class labels
                 # where each label is in the format 01-15
                 classCount[int(obj_id)] += 1

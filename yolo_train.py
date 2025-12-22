@@ -1,9 +1,10 @@
+from pathlib import Path
 import torch
 import shutil
 from ultralytics import YOLO
 
 
-def train_YOLO(path: str = None, epochs: int = None, batch_size: int = None, IMG_SIZE: int = None, device = torch.device("cpu")):
+def train_YOLO(epochs: int = None, batch_size: int = None, IMG_SIZE: int = None, device = torch.device("cpu")):
     """
     Finetune YOLO model on LineMOD.
     After training evaluate (in 'evaluate_YOLO.py') on validation set by returning metrics like mAP.
@@ -16,12 +17,13 @@ def train_YOLO(path: str = None, epochs: int = None, batch_size: int = None, IMG
     """
     
     # se 'yolo11n.pt' (i pesi pre-addestrati) non sono già dentro 'checkpoints/' allora verranno scaricati sul momento
-    model = YOLO(f"{path}/checkpoints/yolo11n.pt")
+    
+    model = YOLO(str(Path("checkpoints") / "yolo11n.pt"))
 
     # model will automatically scale the image and related bounding box according to imgsz.
     # Il metodo train stampa ad ogni epoca di validazione le metriche
     results = model.train(
-        data=f"{path}/datasets/linemod/YOLO/datasets/data.yaml",
+        data=str(Path("datasets") / "linemod" / "YOLO" / "datasets" / "data.yml"),
         epochs=epochs,
         batch=batch_size,
         device=device,
@@ -44,4 +46,7 @@ def train_YOLO(path: str = None, epochs: int = None, batch_size: int = None, IMG
     
     # si prende lo snapshot del modello che ha ottenuto le metriche migliori (ad ogni epoca c'è uno snapshot).
     # Si tenga a mente che YOLO tiene salvato solo last.pt e best.pt
-    shutil.copy(f"./runs/detect/train/weights/best.pt", f"./checkpoints/best.pt")
+    shutil.copy(
+        str(Path("runs") / "detect" / "train" / "weights" / "best.pt"), 
+        str(Path("checkpoints") / "best.py")
+    )
