@@ -9,6 +9,7 @@ Calcola metriche:
 """
 
 import os
+from sklearn import metrics
 import torch
 import numpy as np
 import yaml
@@ -92,9 +93,13 @@ def evaluate(
     all_diameters = []   # Per calcolare accuracy @ 10%
     
     IMG_WIDTH, IMG_HEIGHT = 640, 480
-    
+
+    # collect metrics per classe
+    per_class_metrics=[[] for _ in range(len(object_diameters))]
+
     print("Evaluating...")
     with torch.no_grad():
+        
         for batch in tqdm(test_loader):
             cropped_img = batch['cropped_img'].to(device)
             gt_translation = batch['translation'].to(device)
@@ -143,11 +148,12 @@ def evaluate(
                 # Rotation e translation errors
                 rot_err = compute_rotation_error(pred_R[i], gt_R[i])
                 trans_err = compute_translation_error(pred_t[i], gt_t[i])
-                
+               
                 all_rot_errors.append(rot_err)
                 all_trans_errors.append(trans_err)
                 all_object_ids.append(obj_id)
                 all_diameters.append(object_diameters[obj_id])
+                
                 
                 # ADD o ADD-S
                 if obj_id in symmetric_objects:
@@ -156,11 +162,13 @@ def evaluate(
                     )
                     all_add_s.append(add_s * 100)  # m -> cm
                     all_add.append(add_s * 100)  # Per calcolo complessivo
+                    per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add_s * 100 })
                 else:
                     add = compute_add_metric(
                         pred_R[i], pred_t[i], gt_R[i], gt_t[i], model_points
                     )
                     all_add.append(add * 100)  # m -> cm
+                    per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add * 100 })
     
     # Risultati semplificati
     print("\n" + "="*60)
@@ -197,3 +205,27 @@ def evaluate(
     print(f"Mean ADD Error:         {np.mean(all_add):6.2f} cm")
     
     print("\n" + "="*60)
+
+    per_class_results=[]
+    for class_id, metrics in enumerate(per_class_metrics):
+        if len(metrics) == 0:
+            continue
+
+        rot_errors = np.array([m['rotation'] for m in metrics])
+        trans_errors = np.array([m['translation'] for m in metrics])
+        add_errors = np.array([m['add'] for m in metrics])
+        
+        # accuracy @ 10% diameter
+        class_diameter_cm = object_diameters[class_id] / 10.0
+        threshold = 0.1 * class_diameter_cm
+        accuracy = np.mean(add_errors < threshold) * 100
+        
+        per_class_results.append({
+        'class_id': class_id,
+        'num_samples': len(metrics),
+        'accuracy_10p': accuracy,
+        'rot_mean': rot_errors.mean(),
+        'trans_mean': trans_errors.mean(),
+        'add_mean': add_errors.mean()
+        })
+    return per_class_results
