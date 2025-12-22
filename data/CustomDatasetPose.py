@@ -65,17 +65,32 @@ class CustomDatasetPose(Dataset):
         if self.split == 'train':
             self.transform_img = transforms.ToTensor()
 
+            # Data augmentation per training: simula variazioni di illuminazione + errori YOLO
             self.transform_crop = transforms.Compose([
-                transforms.ColorJitter(brightness=0.3, contrast=0.2, saturation=0.2, hue=0.05),
-                transforms.RandomGrayscale(p=0.1),
-                transforms.RandomApply([transforms.GaussianBlur(kernel_size=3)], p=0.1),
+                # Simula errori di YOLO nella bbox (crop leggermente diverso)
+                transforms.RandomResizedCrop(
+                    size=(224, 224),  # ResNet input size
+                    scale=(0.85, 1.0),  # Crop 85-100% dell'oggetto
+                    ratio=(0.9, 1.1)    # Aspect ratio simile all'originale
+                ),
+                # Variazioni di illuminazione (luci fisse in LineMOD)
+                transforms.ColorJitter(
+                    brightness=0.3,  # ±30% luminosità
+                    contrast=0.2,    # ±20% contrasto
+                    saturation=0.2,  # ±20% saturazione
+                    hue=0.05         # ±5% hue
+                ),
+                transforms.RandomGrayscale(p=0.1),  # 10% grigio (robustezza)
+                transforms.RandomApply([transforms.GaussianBlur(kernel_size=3)], p=0.1),  # Blur
                 transforms.ToTensor(),
                 transforms.Normalize(mean=self.image_mean, std=self.image_std)
             ])
         else:
             self.transform_img = transforms.ToTensor()
 
+            # Validation/Test: solo normalizzazione + resize (no augmentation)
             self.transform_crop = transforms.Compose([
+                transforms.Resize((224, 224)),  # Resize fisso per consistency
                 transforms.ToTensor(),
                 transforms.Normalize(mean=self.image_mean, std=self.image_std)
             ])
@@ -153,6 +168,35 @@ class CustomDatasetPose(Dataset):
         Get the object diameters dictionary.
         """
         return {obj_id: info['diameter'] for obj_id, info in self.objects_info.items()}
+    
+    def get_model_points(self, obj_id):
+        """
+        Carica i corner points 3D del modello per un oggetto specifico.
+        Usato per ADD loss durante training.
+        
+        Args:
+            obj_id (int): ID dell'oggetto (1-15)
+            
+        Returns:
+            torch.Tensor: (8, 3) corner points in metri
+        """
+        info = self.objects_info[obj_id]
+        min_x, min_y, min_z = info['min_x'], info['min_y'], info['min_z']
+        size_x, size_y, size_z = info['size_x'], info['size_y'], info['size_z']
+        
+        # 8 corners del bounding box 3D (in mm)
+        corners = np.array([
+            [min_x, min_y, min_z],
+            [min_x + size_x, min_y, min_z],
+            [min_x, min_y + size_y, min_z],
+            [min_x + size_x, min_y + size_y, min_z],
+            [min_x, min_y, min_z + size_z],
+            [min_x + size_x, min_y, min_z + size_z],
+            [min_x, min_y + size_y, min_z + size_z],
+            [min_x + size_x, min_y + size_y, min_z + size_z]
+        ], dtype=np.float32) / 1000.0  # mm -> metri
+        
+        return torch.from_numpy(corners)
 
     def load_image(self, img_path):
         """
