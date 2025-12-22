@@ -175,7 +175,7 @@ class CustomDatasetPose(Dataset):
         img = Image.open(img_path).convert("RGB")
         return self.transform_img(img)
 
-    # APPLICARE ANCHE RANDOM JITTER AL BBOX GROUND TRUTH?
+    # APPLICARE ANCHE RANDOM JITTER AL BBOX GROUND TRUTH ???
     def load_cropped_image(self, img_path, bbox):
         """
         Load an RGB image, crop it, resize/pad and return it.
@@ -198,7 +198,7 @@ class CustomDatasetPose(Dataset):
         offset_y = (max_dim - h_crop) // 2
         square_img.paste(cropped_img, (offset_x, offset_y))
         
-        # resize alla dimensione di input della ResNet (es. 224).
+        # resize alla dimensione di input della ResNet (224x224).
         # Importante: ora che è quadrata, il resize non deforma l'oggetto!
         square_img = square_img.resize((224, 224), Image.BILINEAR)
 
