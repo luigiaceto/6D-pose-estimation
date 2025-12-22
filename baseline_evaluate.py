@@ -9,7 +9,6 @@ Calcola metriche:
 """
 
 import os
-from sklearn import metrics
 import torch
 import numpy as np
 import yaml
@@ -157,20 +156,29 @@ def evaluate(
                 
                 
                 # ADD o ADD-S
-                if obj_id in symmetric_objects:
-                    add_s = compute_add_s_metric(
-                        pred_R[i], pred_t[i], gt_R[i], gt_t[i], model_points
-                    )
-                    all_add_s.append(add_s * 100)  # m -> cm
-                    all_add.append(add_s * 100)  # Per calcolo complessivo
-                    per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add_s * 100 })
-                else:
-                    add = compute_add_metric(
-                        pred_R[i], pred_t[i], gt_R[i], gt_t[i], model_points
-                    )
-                    all_add.append(add * 100)  # m -> cm
-                    per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add * 100 })
-    
+                try:
+                    if obj_id in symmetric_objects:
+                        add_s = compute_add_s_metric(
+                            pred_R[i], pred_t[i], gt_R[i], gt_t[i], model_points
+                        )
+                        all_add_s.append(add_s * 100)  # m -> cm
+                        all_add.append(add_s * 100)  # Per calcolo complessivo
+                        per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add_s * 100 })
+                    else:
+                        add = compute_add_metric(
+                            pred_R[i], pred_t[i], gt_R[i], gt_t[i], model_points
+                        )
+                        all_add.append(add * 100)  # m -> cm
+                        per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add * 100 })
+                except Exception as e:
+                    print(f"--- CRASH DETECTED ---")
+                    print(f"Indice i attuale: {i}")
+                    print(f"ID oggetto: {obj_id}")
+                    print ("per class metrics:", per_class_metrics)
+                    print(f"Lunghezza object_diameters: {len(object_diameters)}")
+                    print(f"Shape pred_R: {pred_R.shape}")
+                    raise e
+        
     # Risultati semplificati
     print("\n" + "="*60)
     print("EVALUATION RESULTS")
