@@ -305,7 +305,8 @@ def print_evaluation_results_table(metrics_per_class, save_table=True, table_pat
     ]
 
     df = df.round(2)
-    df = df.sort_values(by='Object ID', ascending=True)
+    #df = df.sort_values(by='Object ID', ascending=True)
+
     if save_table:
         df.to_csv(table_path, index=False)
         print(f"Saved CSV to {table_path}")
