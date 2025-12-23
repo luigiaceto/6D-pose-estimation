@@ -15,6 +15,7 @@ import numpy as np
 import yaml
 from tqdm import tqdm
 from collections import defaultdict
+import pandas as pd
 
 from models.ResNetPose import ResNetPose, quaternion_to_rotation_matrix
 from models.PinholeCamera import PinholeCamera
@@ -66,7 +67,9 @@ def evaluate(
     test_loader,
     cam_k,
     checkpoint_path=str(Path("checkpoints") / "best_pose_model.pt"), 
-    device='cuda'
+    device='cuda',
+    save_table= True,
+    table_path= str(Path("results") / "evaluation_results.csv")
 ):
     """
     Evaluation del modello baseline.
@@ -180,11 +183,6 @@ def evaluate(
                     )
                     all_add_rotation_only.append(add_rotation_only * 100)
                     per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add * 100, 'add_rotation_only': add_rotation_only * 100 })
-        
-    # Risultati semplificati
-    print("\n" + "="*60)
-    print("EVALUATION RESULTS")
-    print("="*60)
     
     all_add_np = np.array(all_add)
     all_diameters_np = np.array(all_diameters)
@@ -196,10 +194,10 @@ def evaluate(
     # Accuracy @ 10% diameter (metrica standard)
     threshold_10 = all_diameters_cm * 0.1
     accuracy = np.mean(all_add_np < threshold_10) * 100
-    
-    print(f"\n📊 MODEL ACCURACY: {accuracy:.2f}%")
-    print(f"   (predictions within 10% of object diameter)\n")
-    
+
+    # Accuracy @ 10% diameter (rot only)
+    all_accuracy_rot_only = np.mean(all_add_rotation_only_np < threshold_10) * 100
+
     # Interpretazione
     if accuracy >= 80:
         level = "EXCELLENT"
@@ -210,17 +208,7 @@ def evaluate(
     else:
         level = "POOR"
     print(f"Performance Level: {level}\n")
-    
-    # Metriche essenziali
-    print(f"Mean Rotation Error:    {np.mean(all_rot_errors):6.2f}°")
-    print(f"Mean Translation Error: {np.mean(all_trans_errors):6.2f} cm")
-    print(f"Mean ADD Error:         {np.mean(all_add):6.2f} cm")
-    print(f"Mean ADD-Rot-Only Error:{np.mean(all_add_rotation_only):6.2f} cm")
 
-    accuracy_rot_only = np.mean(all_add_rotation_only_np < threshold_10) * 100
-    print(f"Accuracy @10% Diam (Rot-Only): {accuracy_rot_only:.2f}%")
-    
-    print("\n" + "="*60)
 
     per_class_results=[]
     for class_id, metrics in per_class_metrics.items():
@@ -250,5 +238,75 @@ def evaluate(
         'add_rot_only_mean': add_rotation_only_errors.mean(),
         'accuracy_10p_rot_only': accuracy_rot_only
         })
+    
+    # add total avg last row
+    per_class_results.append({
+        'class_id': 'ALL',
+        'num_samples': len(all_add),
+        'accuracy_10p': accuracy,
+        'rot_mean': np.mean(all_rot_errors),
+        'trans_mean': np.mean(all_trans_errors),
+        'add_mean': np.mean(all_add),
+        'add_rot_only_mean': np.mean(all_add_rotation_only),
+        'accuracy_10p_rot_only': all_accuracy_rot_only
+    })
 
-    return per_class_results
+    print_evaluation_results_table(per_class_results, save_table, table_path)   
+
+
+def print_evaluation_results_table(metrics_per_class, save_table=True, table_path=str(Path("results") / "evaluation_results.csv")):
+    
+    LINEMOD_OBJECT_NAMES = {
+    1: "ape",
+    2: "benchvise",
+    3: "bowl",
+    4: "camera",
+    5: "can",
+    6: "cat",
+    7: "cup",
+    8: "driller",
+    9: "duck",
+    10: "eggbox",
+    11: "glue",
+    12: "holepuncher",
+    13: "iron",
+    14: "lamp",
+    15: "phone",
+    "ALL": "ALL"
+    }
+
+    df = pd.DataFrame(metrics_per_class)
+    df['Object Name'] = df['class_id'].map(LINEMOD_OBJECT_NAMES)
+
+    df = df.rename(columns={
+        'object_name': 'Object Name',
+        'class_id': 'Object ID',
+        'num_samples': '#Samples',
+        'accuracy_10p': 'Accuracy @10% (%)',
+        'rot_mean': 'Rotation Error (deg)',
+        'trans_mean': 'Translation Error (cm)',
+        'add_mean': 'ADD / ADD-S (cm)',
+        'add_rot_only_mean': ' ADD (rot only) (cm)',
+        'accuracy_10p_rot_only': 'Accuracy @10% (rot only) (%)',      
+    })
+
+    df = df[
+        [
+            'Object ID',
+            'Object Name',
+            '#Samples',
+            'Accuracy @10% (%)',
+            'Rotation Error (deg)',
+            'Translation Error (cm)',
+            'ADD / ADD-S (cm)',
+            ' ADD (rot only) (cm)',
+            'Accuracy @10% (rot only) (%)'
+        ]
+    ]
+
+    df = df.round(2)
+    df = df.sort_values(by='Object ID', ascending=True)
+    if save_table:
+        df.to_csv(table_path, index=False)
+        print(f"Saved CSV to {table_path}")
+    return df
