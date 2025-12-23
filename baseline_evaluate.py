@@ -9,19 +9,22 @@ Calcola metriche:
 """
 
 import os
+from pathlib import Path
 import torch
 import numpy as np
 import yaml
 from tqdm import tqdm
+from collections import defaultdict
+import pandas as pd
 
 from models.ResNetPose import ResNetPose, quaternion_to_rotation_matrix
 from models.PinholeCamera import PinholeCamera
-from models.losses import compute_add_metric, compute_add_s_metric
+from models.losses import compute_add_metric, compute_add_rotation_only, compute_add_s_metric, compute_add_s_rotation_only
 
 
 def load_model_points(dataset_root, obj_id):
     """Carica corner points 3D del modello."""
-    models_info_path = os.path.join(dataset_root, 'models', 'models_info.yml')
+    models_info_path = str(dataset_root+ "/models" + "/models_info.yml")
     with open(models_info_path, 'r') as f:
         models_info = yaml.load(f, Loader=yaml.CLoader)
     
@@ -63,8 +66,10 @@ def evaluate(
     test_dataset,
     test_loader,
     cam_k,
-    checkpoint_path='./checkpoints/best_pose_model.pt',
-    device='cuda'
+    checkpoint_path=str(Path("checkpoints") / "best_pose_model.pt"), 
+    device='cuda',
+    save_table= False,
+    table_path= str( "evaluation_results.csv")
 ):
     """
     Evaluation del modello baseline.
@@ -85,6 +90,7 @@ def evaluate(
     # Metriche
     symmetric_objects = [2, 10]  # eggbox, glue
     all_add = []
+    all_add_rotation_only = []
     all_add_s = []
     all_rot_errors = []
     all_trans_errors = []
@@ -92,9 +98,13 @@ def evaluate(
     all_diameters = []   # Per calcolare accuracy @ 10%
     
     IMG_WIDTH, IMG_HEIGHT = 640, 480
-    
+
+    # collect metrics per classe
+    per_class_metrics= defaultdict(list)
+
     print("Evaluating...")
     with torch.no_grad():
+        
         for batch in tqdm(test_loader):
             cropped_img = batch['cropped_img'].to(device)
             gt_translation = batch['translation'].to(device)
@@ -138,48 +148,54 @@ def evaluate(
                 obj_id = int(obj_ids[i])
                 
                 # Carica model points
-                model_points = load_model_points(dataset_root, obj_id)
+                model_points = load_model_points(str(dataset_root), obj_id)
                 
                 # Rotation e translation errors
                 rot_err = compute_rotation_error(pred_R[i], gt_R[i])
                 trans_err = compute_translation_error(pred_t[i], gt_t[i])
-                
+               
                 all_rot_errors.append(rot_err)
                 all_trans_errors.append(trans_err)
                 all_object_ids.append(obj_id)
                 all_diameters.append(object_diameters[obj_id])
                 
+                
                 # ADD o ADD-S
+                
                 if obj_id in symmetric_objects:
                     add_s = compute_add_s_metric(
                         pred_R[i], pred_t[i], gt_R[i], gt_t[i], model_points
                     )
                     all_add_s.append(add_s * 100)  # m -> cm
                     all_add.append(add_s * 100)  # Per calcolo complessivo
+                    add_s_rotation_only = compute_add_s_rotation_only(
+                        pred_R[i], gt_R[i], model_points
+                    )
+                    all_add_rotation_only.append(add_s_rotation_only * 100)
+                    per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add_s * 100, 'add_rotation_only': add_s_rotation_only * 100 })
                 else:
                     add = compute_add_metric(
                         pred_R[i], pred_t[i], gt_R[i], gt_t[i], model_points
                     )
                     all_add.append(add * 100)  # m -> cm
-    
-    # Risultati semplificati
-    print("\n" + "="*60)
-    print("EVALUATION RESULTS")
-    print("="*60)
+                    add_rotation_only = compute_add_rotation_only(
+                        pred_R[i], gt_R[i], model_points
+                    )
+                    all_add_rotation_only.append(add_rotation_only * 100)
+                    per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add * 100, 'add_rotation_only': add_rotation_only * 100 })
     
     all_add_np = np.array(all_add)
     all_diameters_np = np.array(all_diameters)
-    
+  
+
     # Converti diametri da mm a cm per confronto
     all_diameters_cm = all_diameters_np / 10.0
     
     # Accuracy @ 10% diameter (metrica standard)
     threshold_10 = all_diameters_cm * 0.1
     accuracy = np.mean(all_add_np < threshold_10) * 100
-    
-    print(f"\n📊 MODEL ACCURACY: {accuracy:.2f}%")
-    print(f"   (predictions within 10% of object diameter)\n")
-    
+
+
     # Interpretazione
     if accuracy >= 80:
         level = "EXCELLENT"
@@ -190,10 +206,97 @@ def evaluate(
     else:
         level = "POOR"
     print(f"Performance Level: {level}\n")
+
+
+    per_class_results=[]
+    for class_id, metrics in per_class_metrics.items():
+        if len(metrics) == 0:
+            continue
+
+        rot_errors = np.array([m['rotation'] for m in metrics])
+        trans_errors = np.array([m['translation'] for m in metrics])
+        add_errors = np.array([m['add'] for m in metrics])
+        add_rotation_only_errors = np.array([m['add_rotation_only'] for m in metrics])
+        
+        # accuracy @ 10% diameter
+        class_diameter_cm = object_diameters[class_id] / 10.0
+        threshold = 0.1 * class_diameter_cm
+        accuracy = np.mean(add_errors < threshold) * 100
+        
+        per_class_results.append({
+        'class_id': class_id,
+        'num_samples': len(metrics),
+        'accuracy_10p': accuracy,
+        'rot_mean': rot_errors.mean(),
+        'trans_mean': trans_errors.mean(),
+        'add_mean': add_errors.mean(),
+        'add_rot_only_mean': add_rotation_only_errors.mean(),
+        })
     
-    # Metriche essenziali
-    print(f"Mean Rotation Error:    {np.mean(all_rot_errors):6.2f}°")
-    print(f"Mean Translation Error: {np.mean(all_trans_errors):6.2f} cm")
-    print(f"Mean ADD Error:         {np.mean(all_add):6.2f} cm")
+    # add total avg last row
+    per_class_results.append({
+        'class_id': 'ALL',
+        'num_samples': len(all_add),
+        'accuracy_10p': accuracy,
+        'rot_mean': np.mean(all_rot_errors),
+        'trans_mean': np.mean(all_trans_errors),
+        'add_mean': np.mean(all_add),
+        'add_rot_only_mean': np.mean(all_add_rotation_only),
+    })
+
+    return print_evaluation_results_table(per_class_results, save_table, table_path)   
+
+
+def print_evaluation_results_table(metrics_per_class, save_table=False, table_path=str("evaluation_results.csv")):
     
-    print("\n" + "="*60)
+    LINEMOD_OBJECT_NAMES = {
+    1: "ape",
+    2: "benchvise",
+    3: "bowl",
+    4: "camera",
+    5: "can",
+    6: "cat",
+    7: "cup",
+    8: "driller",
+    9: "duck",
+    10: "eggbox",
+    11: "glue",
+    12: "holepuncher",
+    13: "iron",
+    14: "lamp",
+    15: "phone",
+    "ALL": "ALL"
+    }
+
+    df = pd.DataFrame(metrics_per_class)
+    df['Object Name'] = df['class_id'].map(LINEMOD_OBJECT_NAMES)
+    df = df.drop(columns=['class_id'])
+    df = df.rename(columns={
+        'object_name': 'Object Name',
+        'num_samples': '#Samples',
+        'accuracy_10p': 'Accuracy @10% (%)',
+        'rot_mean': 'Rotation Error (deg)',
+        'trans_mean': 'Translation Error (cm)',
+        'add_mean': 'ADD / ADD-S (cm)',
+        'add_rot_only_mean': ' ADD (rot only) (cm)',
+    })
+
+    df = df[
+        [
+            'Object Name',
+            '#Samples',
+            'Accuracy @10% (%)',
+            'Rotation Error (deg)',
+            'Translation Error (cm)',
+            'ADD / ADD-S (cm)',
+            ' ADD (rot only) (cm)',
+        ]
+    ]
+
+    df = df.round(2)
+    #df = df.sort_values(by='Object ID', ascending=True)
+
+    if save_table:
+        df.to_csv(table_path, index=False)
+        print(f"Saved CSV to {table_path}")
+    return df

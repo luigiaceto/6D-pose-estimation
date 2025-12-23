@@ -2,6 +2,7 @@
 Funzioni di visualizzazione per 6D pose.
 """
 
+from pathlib import Path
 from PIL import Image
 import cv2
 import numpy as np
@@ -232,10 +233,11 @@ def draw_axis_colored(img, R, t, K, scale=0.05, colors=None):
 
 
 def visualize_predictions(
+    dataset_root,
     cam_k,
-    image_path = "./datasets/linemod/DenseFusion/Linemod_preprocessed/data/04/rgb/0000.png",
-    yolo_checkpoint='./checkpoints/best.pt',
-    pose_checkpoint='./checkpoints/best_pose_model.pt',
+    image_path,
+    yolo_checkpoint=str(Path("checkpoints") / "best.pt"),
+    pose_checkpoint=str(Path("checkpoints") / "best_pose_model_with_stats.pt"),
     device='cuda',
     figsize=(12, 8),
     show_gt=True
@@ -245,8 +247,7 @@ def visualize_predictions(
     """
     
     # Load object diameters
-    dataset_root = "./datasets/linemod/DenseFusion/Linemod_preprocessed"
-    models_info_path = os.path.join(dataset_root, 'models', 'models_info.yml')
+    models_info_path = str(dataset_root / "models" / "models_info.yml")
     with open(models_info_path, 'r') as f:
         models_info = yaml.load(f, Loader=yaml.CLoader)
     object_diameters = {obj_id: info['diameter'] for obj_id, info in models_info.items()}
@@ -361,7 +362,7 @@ def visualize_predictions(
                 
                 # Print confronto numerico
                 print(f"\n Object {obj_id} (Class {class_id})")
-                print(f"\n  GROUND TRUTH:")
+                print(f"\n GROUND TRUTH:")
                 print(f"     Translation: [{gt_translation[0]:7.4f}, {gt_translation[1]:7.4f}, {gt_translation[2]:7.4f}] m")
                 print(f"     Quaternion:  [{gt_quat[0]:7.4f}, {gt_quat[1]:7.4f}, {gt_quat[2]:7.4f}, {gt_quat[3]:7.4f}]")
                 
@@ -405,10 +406,6 @@ def visualize_predictions(
                 print(f"       - Y error: {trans_diff[1]:6.2f} cm")
                 print(f"       - Z error (depth): {trans_diff[2]:6.2f} cm  ← Main issue!")
                 print(f"     Rotation Error:       {rot_error:.2f}°")
-                
-                # Legend
-                cv2.putText(img, "Green = GT | Cyan = Pred", (10, 30), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
     
     print("\n" + "="*70 + "\n")
 
@@ -419,11 +416,3 @@ def visualize_predictions(
     plt.axis('off')
     plt.title('Green = Ground Truth | Cyan = Prediction', fontsize=14)
     plt.show()
-    
-
-if __name__ == "__main__":
-    # Esempio
-    visualize_predictions(
-        image_path="./datasets/linemod/DenseFusion/Linemod_preprocessed/data/04/rgb/0010.png",
-        device='cuda'
-    )

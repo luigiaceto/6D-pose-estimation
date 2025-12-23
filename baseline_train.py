@@ -9,6 +9,7 @@ Pipeline:
 """
 
 import os
+from pathlib import Path
 import torch
 import torch.optim as optim
 import numpy as np
@@ -230,19 +231,14 @@ def train(
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             
-            # Get image normalization stats from dataset
-            image_mean, image_std = train_dataset.get_image_mean_std()
-            
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
                 'lr': lr,
-                'val_loss': avg_val_loss,
-                'image_mean': image_mean.tolist(),
-                'image_std': image_std.tolist()
-            }, os.path.join(checkpoint_dir, checkpoint_name)) 
-            print(f"✓ Saved best model to {checkpoint_name}")
-    
+                'val_loss': avg_val_loss
+            }, str(Path(checkpoint_dir) / "best_pose_model.pt"))
+            print(f"✓ Saved best model")
+            
     print("\nTraining completed!")

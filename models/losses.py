@@ -173,3 +173,46 @@ def compute_add_s_metric(pred_R, pred_t, gt_R, gt_t, model_points):
     min_distances = np.min(distances, axis=1)
     
     return np.mean(min_distances)
+
+
+def compute_add_rotation_only(pred_R, gt_R, model_points):
+    """
+    ADD metric SOLO sulla rotazione (ADD-R).
+
+    Args:
+        pred_R: (3, 3) numpy array
+        gt_R: (3, 3) numpy array
+        model_points: (N, 3) numpy array
+
+    Returns:
+        float: ADD-R in metri
+    """
+    import numpy as np
+
+    pred_points = (pred_R @ model_points.T).T
+    gt_points = (gt_R @ model_points.T).T
+
+    distances = np.linalg.norm(pred_points - gt_points, axis=1)
+    return np.mean(distances)
+
+
+def compute_add_s_rotation_only(pred_R,  gt_R, model_points):
+    """
+    ADD-S metric per oggetti simmetrici.
+    
+    Args:
+        Same as compute_add_metric
+        
+    Returns:
+        float: ADD-S in metri
+    """
+    import numpy as np
+    
+    pred_points = (pred_R @ model_points.T).T 
+    gt_points = (gt_R @ model_points.T).T 
+    
+    # Distanza minima per ogni punto predetto
+    distances = np.linalg.norm(pred_points[:, None, :] - gt_points[None, :, :], axis=2)
+    min_distances = np.min(distances, axis=1)
+    
+    return np.mean(min_distances)
