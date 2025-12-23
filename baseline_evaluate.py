@@ -171,7 +171,7 @@ def evaluate(
                     add_s_rotation_only = compute_add_s_rotation_only(
                         pred_R[i], gt_R[i], model_points
                     )
-                    all_add_rotation_only.append(add_s_rotation_only * 100)
+                    
                     per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add_s * 100, 'add_rotation_only': add_s_rotation_only * 100 })
                 else:
                     add = compute_add_metric(
@@ -181,12 +181,12 @@ def evaluate(
                     add_rotation_only = compute_add_rotation_only(
                         pred_R[i], gt_R[i], model_points
                     )
-                    all_add_rotation_only.append(add_rotation_only * 100)
+                   
                     per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add * 100, 'add_rotation_only': add_rotation_only * 100 })
     
     all_add_np = np.array(all_add)
     all_diameters_np = np.array(all_diameters)
-    all_add_rotation_only_np = np.array(all_add_rotation_only)
+  
 
     # Converti diametri da mm a cm per confronto
     all_diameters_cm = all_diameters_np / 10.0
@@ -195,8 +195,6 @@ def evaluate(
     threshold_10 = all_diameters_cm * 0.1
     accuracy = np.mean(all_add_np < threshold_10) * 100
 
-    # Accuracy @ 10% diameter (rot only)
-    all_accuracy_rot_only = np.mean(all_add_rotation_only_np < threshold_10) * 100
 
     # Interpretazione
     if accuracy >= 80:
@@ -224,9 +222,6 @@ def evaluate(
         class_diameter_cm = object_diameters[class_id] / 10.0
         threshold = 0.1 * class_diameter_cm
         accuracy = np.mean(add_errors < threshold) * 100
-
-        # accuracy @ 10% diameter (rot only)
-        accuracy_rot_only = np.mean(add_rotation_only_errors < threshold) * 100
         
         per_class_results.append({
         'class_id': class_id,
@@ -236,7 +231,6 @@ def evaluate(
         'trans_mean': trans_errors.mean(),
         'add_mean': add_errors.mean(),
         'add_rot_only_mean': add_rotation_only_errors.mean(),
-        'accuracy_10p_rot_only': accuracy_rot_only
         })
     
     # add total avg last row
@@ -248,10 +242,9 @@ def evaluate(
         'trans_mean': np.mean(all_trans_errors),
         'add_mean': np.mean(all_add),
         'add_rot_only_mean': np.mean(all_add_rotation_only),
-        'accuracy_10p_rot_only': all_accuracy_rot_only
     })
 
-    print_evaluation_results_table(per_class_results, save_table, table_path)   
+    return print_evaluation_results_table(per_class_results, save_table, table_path)   
 
 
 def print_evaluation_results_table(metrics_per_class, save_table=True, table_path=str("/evaluation_results.csv")):
@@ -287,7 +280,6 @@ def print_evaluation_results_table(metrics_per_class, save_table=True, table_pat
         'trans_mean': 'Translation Error (cm)',
         'add_mean': 'ADD / ADD-S (cm)',
         'add_rot_only_mean': ' ADD (rot only) (cm)',
-        'accuracy_10p_rot_only': 'Accuracy @10% (rot only) (%)',      
     })
 
     df = df[
@@ -300,7 +292,6 @@ def print_evaluation_results_table(metrics_per_class, save_table=True, table_pat
             'Translation Error (cm)',
             'ADD / ADD-S (cm)',
             ' ADD (rot only) (cm)',
-            'Accuracy @10% (rot only) (%)'
         ]
     ]
 
