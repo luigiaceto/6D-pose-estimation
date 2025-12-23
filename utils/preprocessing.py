@@ -15,10 +15,10 @@ def copy_gt_file(dataset_root, file_names: list = None):
     nella cartella datasets/linemod/DenseFusion/Linemod_preprocessed, uno per classe di foto.
     """
     for file_name in file_names:
-        shutil.copy(
-            str(dataset_root + "/data/" + f"{file_name:02d}" + "/gt.yml"),
-            str(dataset_root + f"/{file_name:02d}_gt.yml")
-        )
+        src = dataset_root / "data" / f"{file_name:02d}" / "gt.yml"
+        dst = dataset_root / f"{file_name:02d}_gt.yml"
+
+        shutil.copy(src, dst)
 
 def change_02gt(path):
     """
