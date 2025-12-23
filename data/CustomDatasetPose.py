@@ -4,7 +4,6 @@ import torch
 from torch.utils.data import Dataset
 from PIL import Image
 import numpy as np
-from sklearn.model_selection import train_test_split
 import torchvision.transforms as transforms
 
 IMG_WIDTH = 640
@@ -25,6 +24,8 @@ class CustomDatasetPose(Dataset):
         Carica e preprocessa i dati.
         Serve al modello di 6D pose estimation baseline (che usa solo immagini RGB).
         """
+        from sklearn.model_selection import train_test_split
+        
         self.dataset_root = dataset_root
         self.split = split
         self.train_ratio = train_ratio
