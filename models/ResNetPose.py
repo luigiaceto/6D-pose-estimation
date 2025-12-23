@@ -64,8 +64,9 @@ class ResNetPose(nn.Module):
         # Proiezione finale a 4 valori
         quaternion = self.quaternion_head(x)
         
-        # Normalizzazione L2 dei quaternioni
-        return F.normalize(quaternion, p=2, dim=1)
+        # Normalizzazione L2 dei quaternioni con epsilon adattivo per FP16
+        eps = 1e-8 if quaternion.dtype == torch.float32 else 1e-6
+        return F.normalize(quaternion, p=2, dim=1, eps=eps)
     
     def freeze_backbone(self):
         """Freeze ResNet backbone."""
@@ -90,8 +91,9 @@ def quaternion_to_rotation_matrix(quaternion):
     """
     batch_size = quaternion.shape[0]
     
-    # Normalize
-    quaternion = quaternion / (torch.norm(quaternion, dim=1, keepdim=True) + 1e-8)
+    # Normalize con epsilon più grande per FP16/AMP stability
+    eps = 1e-8 if quaternion.dtype == torch.float32 else 1e-6
+    quaternion = quaternion / (torch.norm(quaternion, dim=1, keepdim=True) + eps)
     
     w, x, y, z = quaternion[:, 0], quaternion[:, 1], quaternion[:, 2], quaternion[:, 3]
     

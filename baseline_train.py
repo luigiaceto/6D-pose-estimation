@@ -13,7 +13,6 @@ import torch
 import torch.optim as optim
 import numpy as np
 from tqdm import tqdm
-import yaml
 
 from models.ResNetPose import ResNetPose
 from models.PinholeCamera import PinholeCamera
@@ -25,34 +24,24 @@ def train(
     train_loader,
     val_loader,
     cam_k,
-    checkpoint_dir='./checkpoints',
-    checkpoint_name='best_pose_model.pt',
+    checkpoint_dir='checkpoints',
+    checkpoint_name = 'best_model.pt',
     epochs=50,
     lr=1e-4,
     weight_decay=1e-5,
     device='cuda',
-    freeze_epochs=5,
-    use_amp=False,
-    use_cosine=False,
-    warmup_epochs=0,
-    use_add_loss=False  # ADD loss per oggetti simmetrici
+    freeze_epochs=5, # epoche dopo le quali scongelare la backbone (pretrainata)
+    warmup_epochs = 3
 ):
     """
     Training del modello di pose estimation.
-    
-    Args:
-        use_amp: Se True, usa Mixed Precision (1.5-2x speedup)
-        use_cosine: Se True, usa Cosine Annealing invece di ReduceLROnPlateau
-        warmup_epochs: Numero di epoche di warmup (consigliato 3)
-        weight_decay: L2 regularization (corretto typo)
-        use_add_loss: Se True, usa ADD loss invece di quaternion loss (per oggetti simmetrici)
     """
     
     os.makedirs(checkpoint_dir, exist_ok=True)
     
     pinhole = PinholeCamera(cam_k)
     
-    # Get object diameters from dataset and create GPU lookup tensor
+    # Get object diameters from dataset
     object_diameters = train_dataset.get_object_diameters()
     # Create a tensor lookup [obj_id] -> diameter (much faster than list comprehension!)
     max_obj_id = max(object_diameters.keys())
@@ -60,29 +49,14 @@ def train(
     for obj_id, diameter in object_diameters.items():
         diameter_lookup[obj_id] = diameter
     
-    # Carica model points per ADD loss (se richiesto)
-    model_points_dict = {}  # {obj_id: tensor(N, 3)}
-    if use_add_loss:
-        print("Loading model points for ADD loss...")
-        for obj_id in object_diameters.keys():
-            model_points = train_dataset.get_model_points(obj_id).to(device)
-            model_points_dict[obj_id] = model_points
-        print(f"Loaded model points for {len(model_points_dict)} objects")
-    
     # Model
     model = ResNetPose().to(device)
     
-    # Setup loss: usa ADD loss se richiesto, altrimenti quaternion geodesic
+    # Setup loss: Hybrid di default
     criterion = PoseLoss(
         lambda_rotation=1.0, 
         lambda_translation=0.0,
-        use_add_loss=use_add_loss
     )
-    
-    if use_add_loss:
-        print("⚠️  Using ADD-based loss (point-to-point distance) for symmetric objects")
-    else:
-        print("✅ Using Quaternion Geodesic loss (standard)")
 
     # Setup optimizer con parameter groups per freeze logic migliore
     # Invece di ricreare optimizer (perdi momentum), usiamo groups con requires_grad
@@ -105,26 +79,14 @@ def train(
             weight_decay=weight_decay
         )
     
-    print(f"Using AdamW optimizer (decoupled weight decay) with lr={lr:.0e}, wd={weight_decay:.0e}")
     
-    # Setup scheduler
-    if use_cosine:
-        # Cosine Annealing: smooth decay da lr iniziale a lr minimo
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=epochs,
-            eta_min=1e-6
-        )
-        print(f"Using Cosine Annealing: {lr:.0e} → 1e-6 over {epochs} epochs")
-    else:
-        # ReduceLROnPlateau: dimezza lr quando loss si stabilizza
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer,
-            mode='min',
-            factor=0.5,
-            patience=5
-        )
-        print("Using ReduceLROnPlateau scheduler")
+    # Cosine Annealing: smooth decay da lr iniziale a lr minimo
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=epochs,
+        eta_min=1e-6
+    )
+
     
     # Setup warmup scheduler
     warmup_scheduler = None
@@ -134,13 +96,9 @@ def train(
                 return (epoch + 1) / warmup_epochs
             return 1.0
         warmup_scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_lambda)
-        print(f"Warmup enabled for {warmup_epochs} epochs")
     
     # Setup Mixed Precision
-    scaler = torch.cuda.amp.GradScaler() if use_amp else None
-    if use_amp:
-        print("Mixed Precision (AMP) enabled - expect 1.5-2x speedup! 🚀")
-    
+    scaler = torch.amp.GradScaler('cuda', enabled=True)
     best_val_loss = float('inf')
     
     # Training loop
@@ -171,7 +129,7 @@ def train(
             optimizer.zero_grad()
             
             # Forward pass with optional AMP
-            with torch.cuda.amp.autocast() if use_amp else torch.enable_grad():
+            with torch.cuda.amp.autocast('cuda', enabled=True):
                 # Forward: ResNet predice SOLO quaternion
                 pred_quaternion = model(cropped_img)
                 
@@ -192,37 +150,22 @@ def train(
                 depth = pinhole.compute_depth_from_bbox(bbox_xyxy, batch_diameters)
                 pred_translation = pinhole.unproject_2d_to_3d(center_2d_pixels, depth)
                 
-                # Prepara model_points per batch (se usa ADD loss)
-                if use_add_loss:
-                    # Per ogni sample nel batch, usa i suoi model_points
-                    # Assumiamo batch omogeneo (stesso obj_id) per semplicità
-                    # Se batch ha oggetti diversi, usa il primo
-                    batch_obj_id = int(obj_id[0].item())
-                    batch_model_points = model_points_dict[batch_obj_id]
-                else:
-                    batch_model_points = None
-                
-                # Loss
+                # Loss (con class_ids per hybrid mode)
                 losses = criterion(
                     pred_quaternion,
                     pred_translation,
                     gt_quaternion,
                     gt_translation,
-                    model_points=batch_model_points
+                    class_ids=obj_id
                 )
                 loss = losses['total_loss']
             
             # Backward with optional AMP
-            if use_amp:
-                scaler.scale(loss).backward()
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                scaler.step(optimizer)
-                scaler.update()
-            else:
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            scaler.step(optimizer)
+            scaler.update()
             
             train_losses.append(loss.item())
         
@@ -261,19 +204,13 @@ def train(
                 depth = pinhole.compute_depth_from_bbox(bbox_xyxy, batch_diameters)
                 pred_translation = pinhole.unproject_2d_to_3d(center_2d_pixels, depth)
                 
-                # Prepara model_points per batch (se usa ADD loss)
-                if use_add_loss:
-                    batch_obj_id = int(obj_id[0].item())
-                    batch_model_points = model_points_dict[batch_obj_id]
-                else:
-                    batch_model_points = None
-                
+                # Loss (con class_ids per hybrid mode)
                 losses = criterion(
                     pred_quaternion,
                     pred_translation,
                     gt_quaternion,
                     gt_translation,
-                    model_points=batch_model_points
+                    class_ids=obj_id
                 )
                 
                 val_losses.append(losses['total_loss'].item())
@@ -283,10 +220,7 @@ def train(
         print(f"Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
         
         # Step scheduler
-        if use_cosine:
-            scheduler.step()  # Cosine: step every epoch
-        else:
-            scheduler.step(avg_val_loss)  # ReduceLR: step on plateau
+        scheduler.step()  # Cosine: step every epoch
         
         # Step warmup scheduler (first N epochs)
         if warmup_scheduler is not None and epoch < warmup_epochs:
@@ -308,7 +242,7 @@ def train(
                 'val_loss': avg_val_loss,
                 'image_mean': image_mean.tolist(),
                 'image_std': image_std.tolist()
-            }, os.path.join(checkpoint_dir, checkpoint_name))  # Usa checkpoint_name personalizzato
+            }, os.path.join(checkpoint_dir, checkpoint_name)) 
             print(f"✓ Saved best model to {checkpoint_name}")
     
     print("\nTraining completed!")
