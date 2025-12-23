@@ -85,7 +85,7 @@ def quaternion_gt(input_path):
                         
                     modified_data[key] = modified_poses
 
-                output_file = input_path + '/' + gt.name
+                output_file = input_path / gt.name
 
                 with open(str(output_file), 'w') as f_output:
                     yaml.dump(
