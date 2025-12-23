@@ -68,8 +68,8 @@ def evaluate(
     cam_k,
     checkpoint_path=str(Path("checkpoints") / "best_pose_model.pt"), 
     device='cuda',
-    save_table= True,
-    table_path= str( "/evaluation_results.csv")
+    save_table= False,
+    table_path= str( "evaluation_results.csv")
 ):
     """
     Evaluation del modello baseline.
@@ -171,7 +171,7 @@ def evaluate(
                     add_s_rotation_only = compute_add_s_rotation_only(
                         pred_R[i], gt_R[i], model_points
                     )
-                    
+                    all_add_rotation_only.append(add_s_rotation_only * 100)
                     per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add_s * 100, 'add_rotation_only': add_s_rotation_only * 100 })
                 else:
                     add = compute_add_metric(
@@ -181,7 +181,7 @@ def evaluate(
                     add_rotation_only = compute_add_rotation_only(
                         pred_R[i], gt_R[i], model_points
                     )
-                   
+                    all_add_rotation_only.append(add_rotation_only * 100)
                     per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add * 100, 'add_rotation_only': add_rotation_only * 100 })
     
     all_add_np = np.array(all_add)
@@ -247,7 +247,7 @@ def evaluate(
     return print_evaluation_results_table(per_class_results, save_table, table_path)   
 
 
-def print_evaluation_results_table(metrics_per_class, save_table=True, table_path=str("/evaluation_results.csv")):
+def print_evaluation_results_table(metrics_per_class, save_table=False, table_path=str("evaluation_results.csv")):
     
     LINEMOD_OBJECT_NAMES = {
     1: "ape",
@@ -270,10 +270,9 @@ def print_evaluation_results_table(metrics_per_class, save_table=True, table_pat
 
     df = pd.DataFrame(metrics_per_class)
     df['Object Name'] = df['class_id'].map(LINEMOD_OBJECT_NAMES)
-
+    df = df.drop(columns=['class_id'])
     df = df.rename(columns={
         'object_name': 'Object Name',
-        'class_id': 'Object ID',
         'num_samples': '#Samples',
         'accuracy_10p': 'Accuracy @10% (%)',
         'rot_mean': 'Rotation Error (deg)',
@@ -284,7 +283,6 @@ def print_evaluation_results_table(metrics_per_class, save_table=True, table_pat
 
     df = df[
         [
-            'Object ID',
             'Object Name',
             '#Samples',
             'Accuracy @10% (%)',
