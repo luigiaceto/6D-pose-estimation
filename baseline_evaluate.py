@@ -69,7 +69,7 @@ def evaluate(
     checkpoint_path=str(Path("checkpoints") / "best_pose_model.pt"), 
     device='cuda',
     save_table= True,
-    table_path= str(Path("results") / "evaluation_results.csv")
+    table_path= str( "/evaluation_results.csv")
 ):
     """
     Evaluation del modello baseline.
@@ -254,7 +254,7 @@ def evaluate(
     print_evaluation_results_table(per_class_results, save_table, table_path)   
 
 
-def print_evaluation_results_table(metrics_per_class, save_table=True, table_path=str(Path("results") / "evaluation_results.csv")):
+def print_evaluation_results_table(metrics_per_class, save_table=True, table_path=str("/evaluation_results.csv")):
     
     LINEMOD_OBJECT_NAMES = {
     1: "ape",
