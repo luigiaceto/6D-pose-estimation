@@ -26,12 +26,12 @@ def train(
     val_loader,
     cam_k,
     checkpoint_dir='checkpoints',
-    checkpoint_name = 'best_model.pt',
+    checkpoint_name = 'best_pose_model.pt',
     epochs=50,
     lr=1e-4,
     weight_decay=1e-5,
     device='cuda',
-    freeze_epochs=5, # epoche dopo le quali scongelare la backbone (pretrainata)
+    freeze_epochs=0, # epoche dopo le quali scongelare la backbone (pretrainata)
     warmup_epochs = 3
 ):
     """
@@ -130,7 +130,7 @@ def train(
             optimizer.zero_grad()
             
             # Forward pass with optional AMP
-            with torch.cuda.amp.autocast('cuda', enabled=True):
+            with torch.amp.autocast(device_type="cuda", enabled=True):
                 # Forward: ResNet predice SOLO quaternion
                 pred_quaternion = model(cropped_img)
                 
@@ -238,7 +238,7 @@ def train(
                 'scheduler_state_dict': scheduler.state_dict(),
                 'lr': lr,
                 'val_loss': avg_val_loss
-            }, str(Path(checkpoint_dir) / "best_pose_model.pt"))
+            }, str(Path(checkpoint_dir) / f"{checkpoint_name}"))
             print(f"✓ Saved best model")
             
     print("\nTraining completed!")

@@ -22,7 +22,7 @@ class PoseLoss(nn.Module):
         super(PoseLoss, self).__init__()
         self.lambda_rotation = lambda_rotation
         self.lambda_translation = lambda_translation
-        
+        self.symmetric_objects = [10, 11]
     
     def quaternion_angular_distance(self, q1, q2):
         """
@@ -37,7 +37,8 @@ class PoseLoss(nn.Module):
         
         # Dot product con abs per gestire q = -q
         dot = torch.abs(torch.sum(q1 * q2, dim=1))
-        dot = torch.clamp(dot, 0.0, 1.0)
+        # Clamp per evitare NaN in acos o problemi numerici
+        dot = torch.clamp(dot, -1.0 + 1e-6, 1.0 - 1e-6)
         
         return torch.mean(1.0 - dot)
     
@@ -72,7 +73,8 @@ class PoseLoss(nn.Module):
         # Geodesic angle: arccos((trace - 1) / 2)
         eps = 1e-6
         cos_angle = (trace - 1.0) / 2.0
-        cos_angle = torch.clamp(cos_angle, -1.0 + eps, 1.0 - eps)  # Safe range per acos
+        # Clamp più aggressivo per evitare NaN
+        cos_angle = torch.clamp(cos_angle, -1.0 + eps, 1.0 - eps)
         
         angle = torch.acos(cos_angle)  # Angolo in radianti [0, π]
         
