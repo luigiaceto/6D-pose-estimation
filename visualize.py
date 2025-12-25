@@ -205,11 +205,10 @@ def visualize_predictions(
     yolo_checkpoint=str(Path("checkpoints") / "best.pt"),
     pose_checkpoint=str(Path("checkpoints") / "best_pose_model_with_stats.pt"),
     device='cuda',
-    figsize=(12, 8),
-    show_gt=True
+    figsize=(12, 8)
 ):
     """
-    Pipeline completa: YOLO -> Crop -> Pose -> Visualizza GT e predizione con confronto numerico.
+    Pipeline completa: YOLO -> Crop -> ResNet -> Visualizza GT e predizione con confronto numerico.
     """
     
     # Load object diameters
@@ -253,7 +252,11 @@ def visualize_predictions(
     obj_folder = match.group(1)
     img_name = match.group(2)
     
-    gt_file = image_path.replace(f'data/{obj_folder}/rgb/{img_name}.png', f'{obj_folder}_gt.yml')
+    
+    gt_file = image_path.replace(
+        str(Path("data") / f"{obj_folder}" / "rgb" / f"{img_name}.png"),
+        f'{obj_folder}_gt.yml'
+    )
     
     with open(gt_file, 'r') as f:
         gt_data = yaml.load(f, Loader=yaml.CLoader)
