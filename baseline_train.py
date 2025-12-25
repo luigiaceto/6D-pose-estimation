@@ -216,3 +216,4 @@ def train(
             print(f"✓ Saved best model")
             
     print("\nTraining completed!")
+    return model

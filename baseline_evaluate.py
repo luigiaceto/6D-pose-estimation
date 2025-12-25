@@ -88,7 +88,7 @@ def evaluate(
     object_diameters = test_dataset.get_object_diameters()
     
     # Metriche
-    symmetric_objects = [2, 10]  # eggbox, glue
+    symmetric_objects = [10, 11]  # eggbox, glue
     all_add = []
     all_add_rotation_only = []
     all_add_s = []
@@ -213,24 +213,24 @@ def evaluate(
         if len(metrics) == 0:
             continue
 
-        rot_errors = np.array([m['rotation'] for m in metrics])
-        trans_errors = np.array([m['translation'] for m in metrics])
-        add_errors = np.array([m['add'] for m in metrics])
-        add_rotation_only_errors = np.array([m['add_rotation_only'] for m in metrics])
+        class_rot_errors = np.array([m['rotation'] for m in metrics])
+        class_trans_errors = np.array([m['translation'] for m in metrics])
+        class_add_errors = np.array([m['add'] for m in metrics])
+        class_add_rotation_only_errors = np.array([m['add_rotation_only'] for m in metrics])
         
         # accuracy @ 10% diameter
         class_diameter_cm = object_diameters[class_id] / 10.0
-        threshold = 0.1 * class_diameter_cm
-        accuracy = np.mean(add_errors < threshold) * 100
+        class_threshold = 0.1 * class_diameter_cm
+        class_accuracy = np.mean(class_add_errors < class_threshold) * 100
         
         per_class_results.append({
         'class_id': class_id,
         'num_samples': len(metrics),
         'accuracy_10p': accuracy,
-        'rot_mean': rot_errors.mean(),
-        'trans_mean': trans_errors.mean(),
-        'add_mean': add_errors.mean(),
-        'add_rot_only_mean': add_rotation_only_errors.mean(),
+        'rot_mean': class_rot_errors.mean(),
+        'trans_mean': class_trans_errors.mean(),
+        'add_mean': class_add_errors.mean(),
+        'add_rot_only_mean': class_add_rotation_only_errors.mean(),
         })
     
     # add total avg last row
