@@ -205,7 +205,9 @@ def visualize_predictions(
     yolo_checkpoint=str(Path("checkpoints") / "best.pt"),
     pose_checkpoint=str(Path("checkpoints") / "best_pose_model_with_stats.pt"),
     device='cuda',
-    figsize=(12, 8)
+    figsize=(12, 8),
+    img_mean=[0.485, 0.456, 0.406],
+    img_std=[0.229, 0.224, 0.225]
 ):
     """
     Pipeline completa: YOLO -> Crop+Padding -> ResNet -> Visualizza GT e predizione con confronto numerico.
@@ -232,8 +234,8 @@ def visualize_predictions(
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(
-            mean=checkpoint['image_mean'],
-            std=checkpoint['image_std']
+            mean=img_mean,
+            std=img_std
         )
     ])
     
