@@ -40,7 +40,7 @@ def draw_axis(img, R, t, K, scale=0.05):
     points_cam = (R @ points_3d.T).T + t
     
     # Proietta a 2D
-    fx, fy, cx, cy = K[0,0], K[1,1], K[0,2], K[1,2]
+    fx, fy, cx, cy = K[0], K[4], K[2], K[5]
     points_2d = []
     for p in points_cam:
         if p[2] > 0:  # Solo se davanti alla camera
@@ -92,18 +92,7 @@ def draw_3d_bbox(img, R, t, K, obj_id, models_info):
     corners_cam = (R @ corners_3d.T).T + t * 1000  # t è in metri, convertiamo in mm
     
     # Proietta a 2D
-    # K può essere: [fx, fy, cx, cy], matrice 3x3, o array 1D con 9 elementi (appiattito)
-    if K.ndim == 1:
-        if len(K) == 4:
-            fx, fy, cx, cy = K
-        elif len(K) == 9:
-            # Matrice 3x3 appiattita in row-major order
-            fx, fy, cx, cy = K[0], K[4], K[2], K[5]
-        else:
-            raise ValueError(f"Array 1D deve avere 4 o 9 elementi, trovato {len(K)}")
-    else:
-        fx, fy, cx, cy = K[0,0], K[1,1], K[0,2], K[1,2]
-    
+    fx, fy, cx, cy = K[0], K[4], K[2], K[5]
     corners_2d = []
     for p in corners_cam:
         if p[2] > 0:  # Solo se davanti alla camera
@@ -137,20 +126,6 @@ def draw_3d_bbox(img, R, t, K, obj_id, models_info):
 
 def draw_3d_bbox_colored(img, R, t, K, obj_id, models_info, color=(255, 255, 0)):
     """Versione con colore personalizzabile per GT vs Pred."""
-    
-    # K può essere: [fx, fy, cx, cy], matrice 3x3, o array 1D con 9 elementi (appiattito)
-    if K.ndim == 1:
-        if len(K) == 4:
-            fx, fy, cx, cy = K
-        elif len(K) == 9:
-            fx, fy, cx, cy = K[0], K[4], K[2], K[5]
-        else:
-            raise ValueError(f"Array 1D deve avere 4 o 9 elementi, trovato {len(K)}")
-    elif K.ndim == 2 and K.shape == (3, 3):
-        fx, fy, cx, cy = K[0,0], K[1,1], K[0,2], K[1,2]
-    else:
-        raise ValueError(f"K deve essere [fx, fy, cx, cy], matrice 3x3, o array appiattito, trovato shape {K.shape}")
-    
     info = models_info[obj_id]
     min_x, min_y, min_z = info['min_x'], info['min_y'], info['min_z']
     size_x, size_y, size_z = info['size_x'], info['size_y'], info['size_z']
@@ -168,6 +143,7 @@ def draw_3d_bbox_colored(img, R, t, K, obj_id, models_info, color=(255, 255, 0))
     
     corners_cam = (R @ corners_3d.T).T + t * 1000
     
+    fx, fy, cx, cy = K[0], K[4], K[2], K[5]
     corners_2d = []
     for p in corners_cam:
         if p[2] > 0:
@@ -203,17 +179,7 @@ def draw_axis_colored(img, R, t, K, scale=0.05, colors=None):
     
     points_cam = (R @ points_3d.T).T + t
     
-    # K può essere: [fx, fy, cx, cy], matrice 3x3, o array 1D con 9 elementi (appiattito)
-    if K.ndim == 1:
-        if len(K) == 4:
-            fx, fy, cx, cy = K
-        elif len(K) == 9:
-            fx, fy, cx, cy = K[0], K[4], K[2], K[5]
-        else:
-            raise ValueError(f"Array 1D deve avere 4 o 9 elementi, trovato {len(K)}")
-    else:
-        fx, fy, cx, cy = K[0,0], K[1,1], K[0,2], K[1,2]
-    
+    fx, fy, cx, cy = K[0], K[4], K[2], K[5]
     points_2d = []
     for p in points_cam:
         if p[2] > 0:
@@ -239,11 +205,10 @@ def visualize_predictions(
     yolo_checkpoint=str(Path("checkpoints") / "best.pt"),
     pose_checkpoint=str(Path("checkpoints") / "best_pose_model_with_stats.pt"),
     device='cuda',
-    figsize=(12, 8),
-    show_gt=True
+    figsize=(12, 8)
 ):
     """
-    Pipeline completa: YOLO -> Crop -> Pose -> Visualizza GT e predizione con confronto numerico.
+    Pipeline completa: YOLO -> Crop -> ResNet -> Visualizza GT e predizione con confronto numerico.
     """
     
     # Load object diameters
@@ -262,15 +227,14 @@ def visualize_predictions(
     
     # Pinhole camera
     pinhole = PinholeCamera(cam_k=cam_k)
-    K = pinhole.get_intrinsics_matrix()
     
-    # Image transforms - usa valori da checkpoint o ImageNet defaults
-    image_mean = checkpoint.get('image_mean', [0.485, 0.456, 0.406])
-    image_std = checkpoint.get('image_std', [0.229, 0.224, 0.225])
-    
+    # Image transforms
     transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize(mean=image_mean, std=image_std)
+        transforms.Normalize(
+            mean=checkpoint['image_mean'],
+            std=checkpoint['image_std']
+        )
     ])
     
     # Load image
@@ -287,7 +251,11 @@ def visualize_predictions(
     obj_folder = match.group(1)
     img_name = match.group(2)
     
-    gt_file = image_path.replace(f'data/{obj_folder}/rgb/{img_name}.png', f'{obj_folder}_gt.yml')
+    
+    gt_file = image_path.replace(
+        str(Path("data") / f"{obj_folder}" / "rgb" / f"{img_name}.png"),
+        f'{obj_folder}_gt.yml'
+    )
     
     with open(gt_file, 'r') as f:
         gt_data = yaml.load(f, Loader=yaml.CLoader)
@@ -353,12 +321,12 @@ def visualize_predictions(
                 gt_quat = np.array(gt_info['quaternion'])
                 
                 # Draw GROUND TRUTH (verde)
-                img = draw_3d_bbox_colored(img, gt_rotation, gt_translation, K, obj_id, models_info, color=(0, 255, 0))
-                img = draw_axis_colored(img, gt_rotation, gt_translation, K, scale=0.05, colors=[(0, 200, 0), (0, 255, 0), (0, 180, 0)])
+                img = draw_3d_bbox_colored(img, gt_rotation, gt_translation, cam_k, obj_id, models_info, color=(0, 255, 0))
+                img = draw_axis_colored(img, gt_rotation, gt_translation, cam_k, scale=0.05, colors=[(0, 200, 0), (0, 255, 0), (0, 180, 0)])
                 
                 # Draw PREDICTION (ciano/blu)
-                img = draw_3d_bbox_colored(img, pred_rotation, pred_translation, K, obj_id, models_info, color=(255, 165, 0))
-                img = draw_axis_colored(img, pred_rotation, pred_translation, K, scale=0.05, colors=[(255, 100, 0), (255, 165, 0), (200, 130, 0)])
+                img = draw_3d_bbox_colored(img, pred_rotation, pred_translation, cam_k, obj_id, models_info, color=(255, 165, 0))
+                img = draw_axis_colored(img, pred_rotation, pred_translation, cam_k, scale=0.05, colors=[(255, 100, 0), (255, 165, 0), (200, 130, 0)])
                 
                 # Print confronto numerico
                 print(f"\n Object {obj_id} (Class {class_id})")

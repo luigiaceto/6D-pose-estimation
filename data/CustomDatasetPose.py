@@ -67,7 +67,7 @@ class CustomDatasetPose(Dataset):
 
             # Data augmentation per training: simula variazioni di illuminazione + errori YOLO
             self.transform_crop = transforms.Compose([
-                # PER IL RESIZE
+                # PER IL RESIZE FORZATO (stretch)
                 # transforms.RandomResizedCrop(
                 #     size=(224, 224),  # ResNet input size
                 #     scale=(0.85, 1.0),  # Crop 85-100% dell'oggetto
@@ -123,7 +123,7 @@ class CustomDatasetPose(Dataset):
         folder_names = []
         samples = []
         for folder_id in range(1, 16):  # Assuming folders are named 01 02 ... 15
-            folder_path = str(self.dataset_root + "data/" + f"{folder_id:02d}" + "/rgb")
+            folder_path = str(self.dataset_root / "data" / f"{folder_id:02d}" / "rgb")
             if os.path.exists(folder_path):
                 # get id of the images
                 folder_names.append(folder_id)
@@ -138,7 +138,7 @@ class CustomDatasetPose(Dataset):
         ground_truth = {}
         for elem in self.folder_names:
 
-            pose_file = str(self.dataset_root  + f"/{elem:02d}_gt.yml")
+            pose_file = str(self.dataset_root / f"{elem:02d}_gt.yml")
 
             with open(pose_file, 'r') as f:
                 pose_data = yaml.load(f, Loader=yaml.CLoader)
@@ -165,7 +165,7 @@ class CustomDatasetPose(Dataset):
         Load YAML configuration files for object info for a specific folder.
         """
 
-        objects_info_path = str(self.dataset_root  + "/models" + "/models_info.yml")
+        objects_info_path = str(self.dataset_root / "models" / "models_info.yml")
 
         with open(objects_info_path, 'r') as f:
             objects_info = yaml.load(f, Loader=yaml.CLoader)
@@ -268,7 +268,7 @@ class CustomDatasetPose(Dataset):
         # bbox is top left corner and width and height info, YOLO needs center coordinates and width and height
         obj_id = np.array(pose['obj_id'], dtype=np.float32) # [1] ---> label
         
-        cropped_img = self.load_cropped_image(str(self.dataset_root + "/data/" + f"{folder_id:02d}" + "/rgb/" + f"{sample_id:04d}.png"), bbox_base)
+        cropped_img = self.load_cropped_image(str(self.dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png"), bbox_base)
 
         # compute initial center
         x_min, y_min, width, height = np.array(pose['obj_bb'], dtype=np.float32)
@@ -312,7 +312,7 @@ class CustomDatasetPose(Dataset):
         """
         folder_id, sample_id = self.samples[idx] # both are integer
 
-        img_path = str(self.dataset_root + "/data/" + f"{folder_id:02d}" + "/rgb/" + f"{sample_id:04d}.png")
+        img_path = str(self.dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png")
 
         img = self.load_image(img_path)
 

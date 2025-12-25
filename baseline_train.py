@@ -26,7 +26,7 @@ def train(
     val_loader,
     cam_k,
     checkpoint_dir='checkpoints',
-    checkpoint_name = 'best_pose_model.pt',
+    checkpoint_name='best_pose_model.pt',
     epochs=50,
     lr=1e-4,
     weight_decay=1e-5,
