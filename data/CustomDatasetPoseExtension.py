@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from PIL import Image
-from CustomDatasetPose import CustomDatasetPose
+from data.CustomDatasetPose import CustomDatasetPose
 
 
 class RGBDDatasetPose(CustomDatasetPose):
@@ -40,6 +40,13 @@ class RGBDDatasetPose(CustomDatasetPose):
         # Conversione in Tensor: da (H, W) a (1, H, W) e in metri
         depth_tensor = torch.tensor(np.array(square_depth), dtype=torch.float32)
         depth_tensor = depth_tensor / 1000.0 # Converti mm -> metri
+
+        # in training applico data augmentation alla depth
+        if self.split == 'train':
+            noise = torch.randn_like(depth_tensor) * 0.003 # +/- 3mm di rumore
+            mask = torch.rand_like(depth_tensor) > 0.02 # 2% dei pixel persi
+            depth_tensor = (depth_tensor + noise) * mask
+
         depth_tensor = depth_tensor.unsqueeze(0) # Aggiungi canale: (1, 224, 224)
         
         return depth_tensor
@@ -56,7 +63,7 @@ class RGBDDatasetPose(CustomDatasetPose):
         
         # Carica depth processata
         depth_tensor = self.load_cropped_depth(folder_id, sample_id, bbox_base)
-        data['depth'] = depth_tensor
+        data['cropped_depth'] = depth_tensor
         
         # IMPORTANTE: Aggiungiamo i centri del bbox in pixel per la formula Pinhole nel modello.
         # bbox_base[0] = x_min, bbox_base[2] = width

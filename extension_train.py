@@ -2,7 +2,6 @@ from pathlib import Path
 import torch
 import torch.optim as optim
 from tqdm import tqdm
-import numpy as np
 
 from models.FusionPoseNet import FusionPoseNet
 from models.ExtensionLoss import RGBDPoseLoss
@@ -26,7 +25,7 @@ def train_one_epoch(
     for batch in pbar:
         # Sposta dati su GPU
         rgb = batch['cropped_img'].to(device)
-        depth = batch['depth'].to(device)
+        depth = batch['cropped_depth'].to(device)
         bbox_center = batch['bbox_center_pixel'].to(device)
         
         gt_quat = batch['quaternion'].to(device)
@@ -73,7 +72,7 @@ def validate(model, loader, criterion, device):
     with torch.no_grad():
         for batch in tqdm(loader, desc="Validation"):
             rgb = batch['cropped_img'].to(device)
-            depth = batch['depth'].to(device)
+            depth = batch['cropped_depth'].to(device)
             bbox_center = batch['bbox_center_pixel'].to(device)
 
             gt_quat = batch['quaternion'].to(device)
@@ -110,8 +109,8 @@ def train(
     model = FusionPoseNet(cam_k=cam_k).to(device)
 
     criterion = RGBDPoseLoss(
-        lambda_rot=1.0,
-        lambda_trans=2.0
+        lambda_rot=20.0,
+        lambda_trans=1.0
     ) # ???
     optimizer = optim.AdamW(
         model.parameters(),
@@ -161,4 +160,3 @@ def train(
         if val_avg_metrics['total_loss'] < best_loss:
             best_loss = val_avg_metrics['total_loss']
             torch.save(model.state_dict(), str(Path(checkpoint_dir) / "best_fusion_model.pt"))
-            

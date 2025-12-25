@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+
 class RGBDPoseLoss(nn.Module):
     """
     Loss combinata per RGB-D Pose Estimation.
@@ -8,12 +9,12 @@ class RGBDPoseLoss(nn.Module):
     NON eredita da PoseLoss per evitare conflitti sui gradienti.
     """
     
-    def __init__(self, lambda_rot=1.0, lambda_trans=1.0):
+    def __init__(self, lambda_rot=20.0, lambda_trans=1.0):
         super(RGBDPoseLoss, self).__init__()
         self.lambda_rot = lambda_rot
         self.lambda_trans = lambda_trans
         
-        # Loss L1 per la traslazione
+        # Loss L1 per la traslazione (forse meglio nn.SmoothL1Loss(beta=1.0) ???)
         self.trans_loss_fn = nn.L1Loss() 
 
     def compute_rot_loss(self, pred_q, gt_q):
@@ -30,7 +31,7 @@ class RGBDPoseLoss(nn.Module):
         # q e -q rappresentano la stessa rotazione, quindi prendiamo il valore assoluto
         dot_product = torch.abs(torch.sum(pred_q * gt_q, dim=1))
         
-        # Clamp per evitare problemi numerici (es. 1.0000001 che romperebbe acos se lo usassimo)
+        # Clamp per evitare problemi numerici
         dot_product = torch.clamp(dot_product, 0.0, 1.0)
         
         # Loss: Vogliamo massimizzare il dot product (avvicinarlo a 1)
