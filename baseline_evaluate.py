@@ -226,7 +226,7 @@ def evaluate(
         per_class_results.append({
         'class_id': class_id,
         'num_samples': len(metrics),
-        'accuracy_10p': accuracy,
+        'accuracy_10p': class_accuracy,
         'rot_mean': class_rot_errors.mean(),
         'trans_mean': class_trans_errors.mean(),
         'add_mean': class_add_errors.mean(),
