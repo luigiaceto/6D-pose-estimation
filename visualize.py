@@ -205,10 +205,12 @@ def visualize_predictions(
     yolo_checkpoint=str(Path("checkpoints") / "best.pt"),
     pose_checkpoint=str(Path("checkpoints") / "best_pose_model_with_stats.pt"),
     device='cuda',
-    figsize=(12, 8)
+    figsize=(12, 8),
+    img_mean=[0.485, 0.456, 0.406],
+    img_std=[0.229, 0.224, 0.225]
 ):
     """
-    Pipeline completa: YOLO -> Crop -> ResNet -> Visualizza GT e predizione con confronto numerico.
+    Pipeline completa: YOLO -> Crop+Padding -> ResNet -> Visualizza GT e predizione con confronto numerico.
     """
     
     # Load object diameters
@@ -232,8 +234,8 @@ def visualize_predictions(
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(
-            mean=checkpoint['image_mean'],
-            std=checkpoint['image_std']
+            mean=img_mean,
+            std=img_std
         )
     ])
     
@@ -289,11 +291,32 @@ def visualize_predictions(
             if cropped.size == 0:
                 continue
             
-            # RGB conversion for model input
+            # Converti in PIL RGB
             cropped_rgb = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB)
             cropped_pil = Image.fromarray(cropped_rgb)
-            cropped_tensor = transform(cropped_pil).unsqueeze(0).to(device)
+
+            # =================================================================
+            # LETTERBOX PADDING
+            # =================================================================
+            w_crop, h_crop = cropped_pil.size
+            max_dim = max(w_crop, h_crop)
+
+            # Creiamo una nuova immagine quadrata nera
+            square_img = Image.new('RGB', (max_dim, max_dim), (0, 0, 0))
+
+            # Calcoliamo offset per centrare l'immagine
+            offset_x = (max_dim - w_crop) // 2
+            offset_y = (max_dim - h_crop) // 2
             
+            # Incolliamo l'immagine al centro
+            square_img.paste(cropped_pil, (offset_x, offset_y))
+            
+            # Resize alla dimensione di input della ResNet (224x224)
+            # Questo è fondamentale perché la rete aspetta questa dimensione fissa
+            final_input = square_img.resize((224, 224), Image.BILINEAR)
+            
+            cropped_tensor = transform(final_input).unsqueeze(0).to(device)
+
             # Predict quaternion
             with torch.no_grad():
                 pred_quaternion = pose_model(cropped_tensor)
@@ -312,7 +335,7 @@ def visualize_predictions(
             pred_rotation = quaternion_to_rotation_matrix(pred_quaternion)[0].cpu().numpy()
             pred_quat = pred_quaternion[0].cpu().numpy()
             
-            # Get ground truth per questa immagine
+            # Estrazione ground truth per questa immagine
             img_idx = int(img_name)
             if img_idx in gt_data:
                 gt_info = gt_data[img_idx][0]  # Primo oggetto
