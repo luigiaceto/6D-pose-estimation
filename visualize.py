@@ -40,7 +40,7 @@ def draw_axis(img, R, t, K, scale=0.05):
     points_cam = (R @ points_3d.T).T + t
     
     # Proietta a 2D
-    fx, fy, cx, cy = K[0,0], K[1,1], K[0,2], K[1,2]
+    fx, fy, cx, cy = K[0], K[4], K[2], K[5]
     points_2d = []
     for p in points_cam:
         if p[2] > 0:  # Solo se davanti alla camera
@@ -92,7 +92,7 @@ def draw_3d_bbox(img, R, t, K, obj_id, models_info):
     corners_cam = (R @ corners_3d.T).T + t * 1000  # t è in metri, convertiamo in mm
     
     # Proietta a 2D
-    fx, fy, cx, cy = K[0,0], K[1,1], K[0,2], K[1,2]
+    fx, fy, cx, cy = K[0], K[4], K[2], K[5]
     corners_2d = []
     for p in corners_cam:
         if p[2] > 0:  # Solo se davanti alla camera
@@ -143,7 +143,7 @@ def draw_3d_bbox_colored(img, R, t, K, obj_id, models_info, color=(255, 255, 0))
     
     corners_cam = (R @ corners_3d.T).T + t * 1000
     
-    fx, fy, cx, cy = K[0,0], K[1,1], K[0,2], K[1,2]
+    fx, fy, cx, cy = K[0], K[4], K[2], K[5]
     corners_2d = []
     for p in corners_cam:
         if p[2] > 0:
@@ -179,7 +179,7 @@ def draw_axis_colored(img, R, t, K, scale=0.05, colors=None):
     
     points_cam = (R @ points_3d.T).T + t
     
-    fx, fy, cx, cy = K[0,0], K[1,1], K[0,2], K[1,2]
+    fx, fy, cx, cy = K[0], K[4], K[2], K[5]
     points_2d = []
     for p in points_cam:
         if p[2] > 0:
@@ -227,7 +227,6 @@ def visualize_predictions(
     
     # Pinhole camera
     pinhole = PinholeCamera(cam_k=cam_k)
-    K = pinhole.get_intrinsics_matrix()
     
     # Image transforms
     transform = transforms.Compose([
@@ -322,12 +321,12 @@ def visualize_predictions(
                 gt_quat = np.array(gt_info['quaternion'])
                 
                 # Draw GROUND TRUTH (verde)
-                img = draw_3d_bbox_colored(img, gt_rotation, gt_translation, K, obj_id, models_info, color=(0, 255, 0))
-                img = draw_axis_colored(img, gt_rotation, gt_translation, K, scale=0.05, colors=[(0, 200, 0), (0, 255, 0), (0, 180, 0)])
+                img = draw_3d_bbox_colored(img, gt_rotation, gt_translation, cam_k, obj_id, models_info, color=(0, 255, 0))
+                img = draw_axis_colored(img, gt_rotation, gt_translation, cam_k, scale=0.05, colors=[(0, 200, 0), (0, 255, 0), (0, 180, 0)])
                 
                 # Draw PREDICTION (ciano/blu)
-                img = draw_3d_bbox_colored(img, pred_rotation, pred_translation, K, obj_id, models_info, color=(255, 165, 0))
-                img = draw_axis_colored(img, pred_rotation, pred_translation, K, scale=0.05, colors=[(255, 100, 0), (255, 165, 0), (200, 130, 0)])
+                img = draw_3d_bbox_colored(img, pred_rotation, pred_translation, cam_k, obj_id, models_info, color=(255, 165, 0))
+                img = draw_axis_colored(img, pred_rotation, pred_translation, cam_k, scale=0.05, colors=[(255, 100, 0), (255, 165, 0), (200, 130, 0)])
                 
                 # Print confronto numerico
                 print(f"\n Object {obj_id} (Class {class_id})")
