@@ -24,7 +24,7 @@ from models.losses import compute_add_metric, compute_add_rotation_only, compute
 
 def load_model_points(dataset_root, obj_id):
     """Carica corner points 3D del modello."""
-    models_info_path = str(dataset_root+ "/models" + "/models_info.yml")
+    models_info_path = str(dataset_root / "models" / "models_info.yml")
     with open(models_info_path, 'r') as f:
         models_info = yaml.load(f, Loader=yaml.CLoader)
     
@@ -68,8 +68,8 @@ def evaluate(
     cam_k,
     checkpoint_path=str(Path("checkpoints") / "best_pose_model.pt"), 
     device='cuda',
-    save_table= False,
-    table_path= str( "evaluation_results.csv")
+    save_table=False,
+    table_path="evaluation_results.csv"
 ):
     """
     Evaluation del modello baseline.
@@ -247,7 +247,7 @@ def evaluate(
     return print_evaluation_results_table(per_class_results, save_table, table_path)   
 
 
-def print_evaluation_results_table(metrics_per_class, save_table=False, table_path=str("evaluation_results.csv")):
+def print_evaluation_results_table(metrics_per_class, save_table=False, table_path="evaluation_results.csv"):
     
     LINEMOD_OBJECT_NAMES = {
     1: "ape",

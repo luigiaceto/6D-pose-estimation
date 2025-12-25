@@ -10,7 +10,6 @@ import torch.nn.functional as F
 from utils.init import set_device
 
 
-# DA CAMBIARE IN LETTERBOX PADDING
 def rgb_collate_fn(batch):
     """  
     Trova le dimensioni massime nel batch per fare padding.
