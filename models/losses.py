@@ -5,19 +5,13 @@ import torch.nn.functional as F
 
 class PoseLoss(nn.Module):
     """
-    Loss per 6D pose estimation.
-    
-    IMPORTANTE: ResNet predice SOLO quaternion (rotazione).
-    La translation viene calcolata geometricamente da bbox + diametro.
-    
-    Quindi la loss ottimizza SOLO il quaternion!
-    La translation viene usata solo per metriche di monitoraggio.
+    Loss per 6D pose estimation baseline.
     """
     
     def __init__(self, lambda_rotation=1.0, lambda_translation=0.0):
         super(PoseLoss, self).__init__()
         self.lambda_rotation = lambda_rotation
-        self.lambda_translation = lambda_translation  # Sempre 0! Translation non ha gradienti
+        self.lambda_translation = lambda_translation
     
     def quaternion_angular_distance(self, q1, q2):
         """
@@ -39,8 +33,8 @@ class PoseLoss(nn.Module):
     def forward(self, pred_quat, pred_trans, gt_quat, gt_trans):
         """
         Args:
-            pred_quat: (B, 4) predicted quaternion (DA RESNET - HA GRADIENTI)
-            pred_trans: (B, 3) predicted translation (CALCOLATA GEOMETRICAMENTE - NO GRADIENTI)
+            pred_quat: (B, 4) predicted quaternion
+            pred_trans: (B, 3) predicted translation
             gt_quat: (B, 4) ground truth quaternion
             gt_trans: (B, 3) ground truth translation
             
