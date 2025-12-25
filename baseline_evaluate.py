@@ -148,7 +148,7 @@ def evaluate(
                 obj_id = int(obj_ids[i])
                 
                 # Carica model points
-                model_points = load_model_points(str(dataset_root), obj_id)
+                model_points = load_model_points(dataset_root, obj_id)
                 
                 # Rotation e translation errors
                 rot_err = compute_rotation_error(pred_R[i], gt_R[i])
