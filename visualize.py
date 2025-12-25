@@ -208,7 +208,7 @@ def visualize_predictions(
     figsize=(12, 8)
 ):
     """
-    Pipeline completa: YOLO -> Crop -> ResNet -> Visualizza GT e predizione con confronto numerico.
+    Pipeline completa: YOLO -> Crop+Padding -> ResNet -> Visualizza GT e predizione con confronto numerico.
     """
     
     # Load object diameters
