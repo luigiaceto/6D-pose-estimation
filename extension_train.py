@@ -51,8 +51,8 @@ def train_one_epoch(
         
         # logging
         total_loss_sum += loss.item()
-        rotation_loss_sum += loss_dict['rot_loss']
-        translation_error_cm_sum += loss_dict['trans_err_cm']
+        rotation_loss_sum += loss_dict['rot_loss'].item()
+        translation_error_cm_sum += loss_dict['trans_err_cm'].item()
     
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
@@ -145,18 +145,18 @@ def train(
             
         train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, device)
         print(
-            f"Train Loss: {train_avg_metrics['total_loss']:.4f} "
-            f"(Rot loss: {train_avg_metrics['rot_loss']:.4f}, Transaltion Err: {train_avg_metrics['trans_error_cm']:.2f} cm)"
+            f"Train Loss: {train_avg_metrics['total_loss_avg']:.4f} "
+            f"(Rot loss: {train_avg_metrics['rot_loss_avg']:.4f}, Transaltion Err: {train_avg_metrics['trans_error_cm_avg']:.2f} cm)"
         )
 
         val_avg_metrics = validate(model, val_loader, criterion, device)
         print(
-            f"Val Loss: {val_avg_metrics['total_loss']:.4f} "
-            f"(Rot loss: {val_avg_metrics['rot_loss']:.4f}, Translation Err: {val_avg_metrics['trans_error_cm']:.2f} cm)"
+            f"Val Loss: {val_avg_metrics['total_loss_avg']:.4f} "
+            f"(Rot loss: {val_avg_metrics['rot_loss_avg']:.4f}, Translation Err: {val_avg_metrics['trans_error_cm_avg']:.2f} cm)"
         )
         
         scheduler.step()
 
-        if val_avg_metrics['total_loss'] < best_loss:
-            best_loss = val_avg_metrics['total_loss']
+        if val_avg_metrics['total_loss_avg'] < best_loss:
+            best_loss = val_avg_metrics['total_loss_avg']
             torch.save(model.state_dict(), str(Path(checkpoint_dir) / "best_fusion_model.pt"))
