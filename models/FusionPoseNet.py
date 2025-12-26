@@ -65,7 +65,7 @@ class FusionPoseNet(nn.Module):
         # Layer di fusione, comune alla due teste
         self.fusion_fc = nn.Sequential(
             nn.Linear(fusion_dim, 1024),
-            nn.LayerNorm(1024),
+            nn.LayerNorm(1024), # meglio rispetto la batchnorm nell'MLP
             nn.ReLU(),
             nn.Dropout(0.1)
         )

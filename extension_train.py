@@ -175,4 +175,16 @@ def train(
 
         if val_avg_metrics['total_loss_avg'] < best_loss:
             best_loss = val_avg_metrics['total_loss_avg']
-            torch.save(model.state_dict(), str(Path(checkpoint_dir) / "best_fusion_model.pt"))
+            
+            # Creiamo un dizionario con TUTTO quello che serve
+            checkpoint_dict = {
+                'epoch': epoch + 1,
+                'model_state_dict': model.state_dict(),         # I pesi del modello
+                'optimizer_state_dict': optimizer.state_dict(), # Stato dell'optimizer (momentum, ecc)
+                'scheduler_state_dict': scheduler.state_dict(), # Stato dello scheduler LR
+                'best_loss': best_loss,                         # Il valore della loss migliore
+            }
+            
+            save_path = str(Path(checkpoint_dir) / "best_fusion_model.pt")
+            torch.save(checkpoint_dict, save_path)
+            print(f"Checkpoint salvato: {save_path} (Loss: {best_loss:.4f})")
