@@ -84,13 +84,13 @@ def validate(model, loader, criterion, device):
             loss_dict = criterion(pred_quat, pred_trans, gt_quat, gt_trans, obj_id)
             
             total_loss_sum += loss_dict['total_loss'].item()
-            rotation_loss_sum += loss_dict['rot_loss']
-            translation_error_cm_sum += loss_dict['trans_err_cm']
+            rotation_loss_sum += loss_dict['rot_loss'].item()
+            translation_error_cm_sum += loss_dict['trans_err_cm'].item()
 
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
         'rot_loss_avg': rotation_loss_sum / len(loader),
-        'trans_error_cm_avg': translation_error_cm_sum / len(loader)
+        'trans_err_cm_avg': translation_error_cm_sum / len(loader)
     }
 
     return avg_metrics
