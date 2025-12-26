@@ -24,7 +24,7 @@ from models.losses import compute_add_metric, compute_add_rotation_only, compute
 
 def load_model_points(dataset_root, obj_id):
     """Carica corner points 3D del modello."""
-    models_info_path = str(dataset_root+ "/models" + "/models_info.yml")
+    models_info_path = str(dataset_root / "models" / "models_info.yml")
     with open(models_info_path, 'r') as f:
         models_info = yaml.load(f, Loader=yaml.CLoader)
     
@@ -68,8 +68,8 @@ def evaluate(
     cam_k,
     checkpoint_path=str(Path("checkpoints") / "best_pose_model.pt"), 
     device='cuda',
-    save_table= False,
-    table_path= str( "evaluation_results.csv")
+    save_table=False,
+    table_path="evaluation_results.csv"
 ):
     """
     Evaluation del modello baseline.
@@ -88,7 +88,7 @@ def evaluate(
     object_diameters = test_dataset.get_object_diameters()
     
     # Metriche
-    symmetric_objects = [2, 10]  # eggbox, glue
+    symmetric_objects = [10, 11]  # eggbox, glue
     all_add = []
     all_add_rotation_only = []
     all_add_s = []
@@ -148,7 +148,7 @@ def evaluate(
                 obj_id = int(obj_ids[i])
                 
                 # Carica model points
-                model_points = load_model_points(str(dataset_root), obj_id)
+                model_points = load_model_points(dataset_root, obj_id)
                 
                 # Rotation e translation errors
                 rot_err = compute_rotation_error(pred_R[i], gt_R[i])
@@ -213,24 +213,24 @@ def evaluate(
         if len(metrics) == 0:
             continue
 
-        rot_errors = np.array([m['rotation'] for m in metrics])
-        trans_errors = np.array([m['translation'] for m in metrics])
-        add_errors = np.array([m['add'] for m in metrics])
-        add_rotation_only_errors = np.array([m['add_rotation_only'] for m in metrics])
+        class_rot_errors = np.array([m['rotation'] for m in metrics])
+        class_trans_errors = np.array([m['translation'] for m in metrics])
+        class_add_errors = np.array([m['add'] for m in metrics])
+        class_add_rotation_only_errors = np.array([m['add_rotation_only'] for m in metrics])
         
         # accuracy @ 10% diameter
         class_diameter_cm = object_diameters[class_id] / 10.0
-        threshold = 0.1 * class_diameter_cm
-        accuracy = np.mean(add_errors < threshold) * 100
+        class_threshold = 0.1 * class_diameter_cm
+        class_accuracy = np.mean(class_add_errors < class_threshold) * 100
         
         per_class_results.append({
         'class_id': class_id,
         'num_samples': len(metrics),
-        'accuracy_10p': accuracy,
-        'rot_mean': rot_errors.mean(),
-        'trans_mean': trans_errors.mean(),
-        'add_mean': add_errors.mean(),
-        'add_rot_only_mean': add_rotation_only_errors.mean(),
+        'accuracy_10p': class_accuracy,
+        'rot_mean': class_rot_errors.mean(),
+        'trans_mean': class_trans_errors.mean(),
+        'add_mean': class_add_errors.mean(),
+        'add_rot_only_mean': class_add_rotation_only_errors.mean(),
         })
     
     # add total avg last row
@@ -247,7 +247,7 @@ def evaluate(
     return print_evaluation_results_table(per_class_results, save_table, table_path)   
 
 
-def print_evaluation_results_table(metrics_per_class, save_table=False, table_path=str("evaluation_results.csv")):
+def print_evaluation_results_table(metrics_per_class, save_table=False, table_path="evaluation_results.csv"):
     
     LINEMOD_OBJECT_NAMES = {
     1: "ape",

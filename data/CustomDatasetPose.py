@@ -1,12 +1,10 @@
 import os
-from tqdm import tqdm
 import yaml
 import torch
 from torch.utils.data import Dataset
 from PIL import Image
 import numpy as np
 import torchvision.transforms as transforms
-from pathlib import Path
 
 IMG_WIDTH = 640
 IMG_HEIGHT = 480
@@ -28,7 +26,7 @@ class CustomDatasetPose(Dataset):
         """
         from sklearn.model_selection import train_test_split
         
-        self.dataset_root = Path(dataset_root)
+        self.dataset_root = dataset_root
         self.split = split
         self.train_ratio = train_ratio
         self.seed = seed
@@ -69,12 +67,12 @@ class CustomDatasetPose(Dataset):
 
             # Data augmentation per training: simula variazioni di illuminazione + errori YOLO
             self.transform_crop = transforms.Compose([
-                # PER IL RESIZE
-                transforms.RandomResizedCrop(
-                    size=(224, 224),  # ResNet input size
-                    scale=(0.85, 1.0),  # Crop 85-100% dell'oggetto
-                    ratio=(0.9, 1.1)    # Aspect ratio simile all'originale
-                ),
+                # PER IL RESIZE FORZATO (stretch)
+                # transforms.RandomResizedCrop(
+                #     size=(224, 224),  # ResNet input size
+                #     scale=(0.85, 1.0),  # Crop 85-100% dell'oggetto
+                #     ratio=(0.9, 1.1)    # Aspect ratio simile all'originale
+                # ),
                 transforms.ColorJitter(
                     brightness=0.3,
                     contrast=0.2,
@@ -97,7 +95,7 @@ class CustomDatasetPose(Dataset):
 
             self.transform_crop = transforms.Compose([
                 # PER IL RESIZE
-                transforms.Resize((224, 224)),  # Resize fisso per consistency
+                # transforms.Resize((224, 224)),  # Resize fisso per consistency
                 transforms.ToTensor(),
                 transforms.Normalize(
                     mean=self.image_mean,
@@ -110,17 +108,6 @@ class CustomDatasetPose(Dataset):
         
         # Load object info and extract diameters
         self.objects_info = self.load_obj_info()
-        
-        # Pre-load images in RAM (optional, disable if OOM)
-        self.preload_images = False
-        
-        if self.preload_images:
-            print(f"Pre-loading {len(self.samples)} images into RAM for {split} split...")
-            self.image_cache = {}
-            for folder_id, sample_id in tqdm(self.samples, desc=f"Caching {split}"):
-                img_path = str(self.dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png")
-                self.image_cache[(folder_id, sample_id)] = Image.open(img_path).convert("RGB")
-            print(f"✓ Cached {len(self.image_cache)} images in RAM")
         
 
     def get_samples_id(self):
@@ -136,8 +123,8 @@ class CustomDatasetPose(Dataset):
         folder_names = []
         samples = []
         for folder_id in range(1, 16):  # Assuming folders are named 01 02 ... 15
-            folder_path = self.dataset_root / "data" / f"{folder_id:02d}" / "rgb"
-            if folder_path.exists():
+            folder_path = str(self.dataset_root / "data" / f"{folder_id:02d}" / "rgb")
+            if os.path.exists(folder_path):
                 # get id of the images
                 folder_names.append(folder_id)
                 sample_ids = sorted([int(f.split('.')[0]) for f in os.listdir(folder_path) if f.endswith('.png')])
@@ -151,7 +138,7 @@ class CustomDatasetPose(Dataset):
         ground_truth = {}
         for elem in self.folder_names:
 
-            pose_file = self.dataset_root / f"{elem:02d}_gt.yml"
+            pose_file = str(self.dataset_root / f"{elem:02d}_gt.yml")
 
             with open(pose_file, 'r') as f:
                 pose_data = yaml.load(f, Loader=yaml.CLoader)
@@ -178,7 +165,7 @@ class CustomDatasetPose(Dataset):
         Load YAML configuration files for object info for a specific folder.
         """
 
-        objects_info_path = self.dataset_root / "models" / "models_info.yml"
+        objects_info_path = str(self.dataset_root / "models" / "models_info.yml")
 
         with open(objects_info_path, 'r') as f:
             objects_info = yaml.load(f, Loader=yaml.CLoader)
@@ -229,88 +216,44 @@ class CustomDatasetPose(Dataset):
     
     # PER IL RESIZE
     
+    # def load_cropped_image(self, img_path, bbox):
+    #     """
+    #     Load an RGB image, crop.
+    #     """
+    #     img = Image.open(img_path).convert("RGB")
+    #     x, y, w, h = bbox
+    #     cropped_img = img.crop((x, y, x+w, y+h)) # give as input the coordinates for left, top, right, bottom
+        
+    #     return self.transform_crop(cropped_img)
+    
+    # APPLICARE ANCHE RANDOM JITTER AL BBOX GROUND TRUTH ???
     def load_cropped_image(self, img_path, bbox):
         """
-        Load an RGB image, crop.
+        Load an RGB image, crop it, resize/pad and return it.
         """
         img = Image.open(img_path).convert("RGB")
         x, y, w, h = bbox
+
+        # crop iniziale dell'immagine secondo il ground truth bounding box
         cropped_img = img.crop((x, y, x+w, y+h)) # give as input the coordinates for left, top, right, bottom
-        
-        return self.transform_crop(cropped_img)
-    
-    # def load_cropped_image(self, img_path, bbox):
-    #     """
-    #     Carica immagine, esegue crop quadrato con contesto (background) e jitter.
-    #     """
-    #     img = Image.open(img_path).convert("RGB")
-    #     W_img, H_img = img.size
-        
-    #     x, y, w, h = bbox
-        
-    #     # 1. Calcola centro e dimensione base (il lato più lungo)
-    #     cx = x + w / 2
-    #     cy = y + h / 2
-    #     size = max(w, h)
-        
-    #     # 2. Aggiungi Context (allarga il crop del 20% per includere sfondo)
-    #     # Questo aiuta la rete a vedere i bordi dell'oggetto e non solo "zoom estremo"
-    #     size = size * 1.2
-        
-    #     # 3. Applica Jitter SOLO in training
-    #     # Simula errori di YOLO: sposta centro e scala leggermente
-    #     if self.split == 'train':
-    #         # Sposta centro +/- 10% della dimensione
-    #         noise_limit = size * 0.1
-    #         cx += np.random.uniform(-noise_limit, noise_limit)
-    #         cy += np.random.uniform(-noise_limit, noise_limit)
-            
-    #         # Zoom In/Out casuale (0.9x - 1.1x)
-    #         scale_factor = np.random.uniform(0.9, 1.1)
-    #         size *= scale_factor
-            
-    #     # 4. Calcola coordinate crop quadrato
-    #     half_size = size / 2
-    #     x1 = int(cx - half_size)
-    #     y1 = int(cy - half_size)
-    #     x2 = int(cx + half_size)
-    #     y2 = int(cy + half_size)
-        
-    #     # 5. Safe Crop con Padding
-    #     # Se il crop esce dall'immagine, non "stretchiamo" i pixel, 
-    #     # ma riempiamo di nero (o media dataset) la parte fuori.
-        
-    #     # Crea tela nera quadrata della dimensione target
-    #     target_size = (int(x2 - x1), int(y2 - y1))
-        
-    #     # Evita crash se size diventa 0 per qualche bug estremo
-    #     if target_size[0] <= 0 or target_size[1] <= 0:
-    #          target_size = (224, 224) 
 
-    #     square_crop = Image.new('RGB', target_size, (0, 0, 0))
-        
-    #     # Coordinate intersezione tra crop desiderato e immagine reale
-    #     src_x1 = max(0, x1)
-    #     src_y1 = max(0, y1)
-    #     src_x2 = min(W_img, x2)
-    #     src_y2 = min(H_img, y2)
-        
-    #     # Se c'è intersezione valida
-    #     if src_x2 > src_x1 and src_y2 > src_y1:
-    #         valid_region = img.crop((src_x1, src_y1, src_x2, src_y2))
-            
-    #         # Calcola dove incollare nella tela nera
-    #         # Se x1 < 0, incolliamo spostati a destra di -x1
-    #         dst_x = max(0, -x1)
-    #         dst_y = max(0, -y1)
-            
-    #         square_crop.paste(valid_region, (dst_x, dst_y))
-        
-    #     # 6. Resize finale a 224x224 per la ResNet
-    #     # Ora l'aspect ratio è preservato perfettamente!
-    #     final_img = square_crop.resize((224, 224), Image.BILINEAR)
+        w_crop, h_crop = cropped_img.size
+        max_dim = max(w_crop, h_crop)
 
-    #     return self.transform_crop(final_img)
+        # creiamo una nuova immagine quadrata nera (o media dataset).
+        # Background nero (0,0,0) va bene se normalizzi dopo
+        square_img = Image.new('RGB', (max_dim, max_dim), (0, 0, 0))
+
+        # incolliamo l'immagine al centro (o in alto a sinistra, basta essere coerenti)
+        offset_x = (max_dim - w_crop) // 2
+        offset_y = (max_dim - h_crop) // 2
+        square_img.paste(cropped_img, (offset_x, offset_y))
+        
+        # resize alla dimensione di input della ResNet (224x224).
+        # Importante: ora che è quadrata, il resize non deforma l'oggetto!
+        square_img = square_img.resize((224, 224), Image.BILINEAR)
+
+        return self.transform_crop(square_img)
 
     def load_6d_pose(self, folder_id: int = None, sample_id: int = None):
         """
@@ -363,63 +306,30 @@ class CustomDatasetPose(Dataset):
         """
         return len(self.samples)
 
-
     def __getitem__(self, idx):
-        """Load a dataset sample with optimized single-pass image loading."""
-        folder_id, sample_id = self.samples[idx]
-        
-        if self.preload_images:
-            img_pil = self.image_cache[(folder_id, sample_id)]
-        else:
-            img_path = self.dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png"
-            img_pil = Image.open(img_path).convert("RGB")
-        
-        # Full image transform
-        img = self.transform_img(img_pil)
-        
-        # Load ground truth
-        pose = self.ground_truths[folder_id][sample_id]
-        bbox_base = np.array(pose['obj_bb'], dtype=np.float32)
-        translation = np.array(pose['cam_t_m2c'], dtype=np.float32)/1000.0
-        rotation = np.array(pose['cam_R_m2c'], dtype=np.float32).reshape(3, 3)
-        quaternion = np.array(pose['quaternion'], dtype=np.float32)
-        obj_id = np.array(pose['obj_id'], dtype=np.float32)
-        
-        x, y, w, h = bbox_base
-        cropped_pil = img_pil.crop((x, y, x+w, y+h))
-        cropped_img = self.transform_crop(cropped_pil)
-        
-        # YOLO bbox computation
-        x_min, y_min, width, height = bbox_base
-        x_center = x_min + width / 2
-        y_center = y_min + height / 2
-        
-        if x_center < 0:
-            width += 2 * x_center
-            x_center = 0
-        elif x_center > IMG_WIDTH:
-            width -= 2 * (x_center - IMG_WIDTH)
-            x_center = IMG_WIDTH
-        
-        if y_center < 0:
-            height += 2 * y_center
-            y_center = 0
-        elif y_center > IMG_HEIGHT:
-            height -= 2 * (y_center - IMG_HEIGHT)
-            y_center = IMG_HEIGHT
-        
-        width = max(0, width)
-        height = max(0, height)
-        bbox_YOLO = np.array([x_center/IMG_WIDTH, y_center/IMG_HEIGHT, width/IMG_WIDTH, height/IMG_HEIGHT], dtype=np.float32)
-        
+        """
+        Load a dataset sample.
+        """
+        folder_id, sample_id = self.samples[idx] # both are integer
+        img_path = str(self.dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png")
+
+
+        img = self.load_image(img_path)
+
+        cropped_img, translation, rotation, quaternion, bbox_base, obj_id, bbox_YOLO = self.load_6d_pose(folder_id, sample_id)
+
         return {
+            # sample
             "sample_id": torch.tensor(self.samples[idx]),
-            "cropped_img": cropped_img,
+            "cropped_img": cropped_img, # input della ResNet50 della baseline
             "rgb": img,
+
+            # label/ground truth
             "obj_id": torch.tensor(obj_id),
             "translation": torch.tensor(translation),
             "rotation": torch.tensor(rotation),
             "quaternion": torch.tensor(quaternion),
             "bbox_base": torch.tensor(bbox_base),
-            "bbox_YOLO": torch.tensor(bbox_YOLO),
+            "bbox_YOLO": torch.tensor(bbox_YOLO), # bounding box ground truth in formato yolo
         }
+    

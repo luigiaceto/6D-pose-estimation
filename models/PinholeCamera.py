@@ -6,8 +6,8 @@ class PinholeCamera:
     """
     Pinhole camera model per conversione tra coordinate 2D e 3D.
     
-    Il modello pinhole proietta un punto 3D in coordinate camera (X, Y, Z)
-    a coordinate 2D image (u, v) usando:
+    Il modello pinhole proietta un punto 3D espresso con le coordinate
+    della camera (X, Y, Z) a coordinate 2D dell'immagine (u, v) usando:
         u = fx * X/Z + cx
         v = fy * Y/Z + cy
     

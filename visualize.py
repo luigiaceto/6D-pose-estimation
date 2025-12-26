@@ -40,7 +40,7 @@ def draw_axis(img, R, t, K, scale=0.05):
     points_cam = (R @ points_3d.T).T + t
     
     # Proietta a 2D
-    fx, fy, cx, cy = K[0,0], K[1,1], K[0,2], K[1,2]
+    fx, fy, cx, cy = K[0], K[4], K[2], K[5]
     points_2d = []
     for p in points_cam:
         if p[2] > 0:  # Solo se davanti alla camera
@@ -92,18 +92,7 @@ def draw_3d_bbox(img, R, t, K, obj_id, models_info):
     corners_cam = (R @ corners_3d.T).T + t * 1000  # t è in metri, convertiamo in mm
     
     # Proietta a 2D
-    # K può essere: [fx, fy, cx, cy], matrice 3x3, o array 1D con 9 elementi (appiattito)
-    if K.ndim == 1:
-        if len(K) == 4:
-            fx, fy, cx, cy = K
-        elif len(K) == 9:
-            # Matrice 3x3 appiattita in row-major order
-            fx, fy, cx, cy = K[0], K[4], K[2], K[5]
-        else:
-            raise ValueError(f"Array 1D deve avere 4 o 9 elementi, trovato {len(K)}")
-    else:
-        fx, fy, cx, cy = K[0,0], K[1,1], K[0,2], K[1,2]
-    
+    fx, fy, cx, cy = K[0], K[4], K[2], K[5]
     corners_2d = []
     for p in corners_cam:
         if p[2] > 0:  # Solo se davanti alla camera
@@ -168,6 +157,7 @@ def draw_3d_bbox_colored(img, R, t, K, obj_id, models_info, color=(255, 255, 0))
     
     corners_cam = (R @ corners_3d.T).T + t * 1000
     
+    fx, fy, cx, cy = K[0], K[4], K[2], K[5]
     corners_2d = []
     for p in corners_cam:
         if p[2] > 0:
@@ -203,17 +193,7 @@ def draw_axis_colored(img, R, t, K, scale=0.05, colors=None):
     
     points_cam = (R @ points_3d.T).T + t
     
-    # K può essere: [fx, fy, cx, cy], matrice 3x3, o array 1D con 9 elementi (appiattito)
-    if K.ndim == 1:
-        if len(K) == 4:
-            fx, fy, cx, cy = K
-        elif len(K) == 9:
-            fx, fy, cx, cy = K[0], K[4], K[2], K[5]
-        else:
-            raise ValueError(f"Array 1D deve avere 4 o 9 elementi, trovato {len(K)}")
-    else:
-        fx, fy, cx, cy = K[0,0], K[1,1], K[0,2], K[1,2]
-    
+    fx, fy, cx, cy = K[0], K[4], K[2], K[5]
     points_2d = []
     for p in points_cam:
         if p[2] > 0:
@@ -240,10 +220,11 @@ def visualize_predictions(
     pose_checkpoint=str(Path("checkpoints") / "best_pose_model.pt"),
     device='cuda',
     figsize=(12, 8),
-    show_gt=True
+    img_mean=[0.485, 0.456, 0.406],
+    img_std=[0.229, 0.224, 0.225]
 ):
     """
-    Pipeline completa: YOLO -> Crop -> Pose -> Visualizza GT e predizione con confronto numerico.
+    Pipeline completa: YOLO -> Crop+Padding -> ResNet -> Visualizza GT e predizione con confronto numerico.
     """
     
     # Load object diameters
@@ -262,15 +243,14 @@ def visualize_predictions(
     
     # Pinhole camera
     pinhole = PinholeCamera(cam_k=cam_k)
-    K = pinhole.get_intrinsics_matrix()
     
-    # Image transforms - usa valori da checkpoint o ImageNet defaults
-    image_mean = checkpoint.get('image_mean', [0.485, 0.456, 0.406])
-    image_std = checkpoint.get('image_std', [0.229, 0.224, 0.225])
-    
+    # Image transforms
     transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize(mean=image_mean, std=image_std)
+        transforms.Normalize(
+            mean=img_mean,
+            std=img_std
+        )
     ])
     
     # Load image
@@ -287,7 +267,11 @@ def visualize_predictions(
     obj_folder = match.group(1)
     img_name = match.group(2)
     
-    gt_file = image_path.replace(f'data/{obj_folder}/rgb/{img_name}.png', f'{obj_folder}_gt.yml')
+    
+    gt_file = image_path.replace(
+        str(Path("data") / f"{obj_folder}" / "rgb" / f"{img_name}.png"),
+        f'{obj_folder}_gt.yml'
+    )
     
     with open(gt_file, 'r') as f:
         gt_data = yaml.load(f, Loader=yaml.CLoader)
@@ -321,11 +305,32 @@ def visualize_predictions(
             if cropped.size == 0:
                 continue
             
-            # RGB conversion for model input
+            # Converti in PIL RGB
             cropped_rgb = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB)
             cropped_pil = Image.fromarray(cropped_rgb)
-            cropped_tensor = transform(cropped_pil).unsqueeze(0).to(device)
+
+            # =================================================================
+            # LETTERBOX PADDING
+            # =================================================================
+            w_crop, h_crop = cropped_pil.size
+            max_dim = max(w_crop, h_crop)
+
+            # Creiamo una nuova immagine quadrata nera
+            square_img = Image.new('RGB', (max_dim, max_dim), (0, 0, 0))
+
+            # Calcoliamo offset per centrare l'immagine
+            offset_x = (max_dim - w_crop) // 2
+            offset_y = (max_dim - h_crop) // 2
             
+            # Incolliamo l'immagine al centro
+            square_img.paste(cropped_pil, (offset_x, offset_y))
+            
+            # Resize alla dimensione di input della ResNet (224x224)
+            # Questo è fondamentale perché la rete aspetta questa dimensione fissa
+            final_input = square_img.resize((224, 224), Image.BILINEAR)
+            
+            cropped_tensor = transform(final_input).unsqueeze(0).to(device)
+
             # Predict quaternion
             with torch.no_grad():
                 pred_quaternion = pose_model(cropped_tensor)
@@ -344,7 +349,7 @@ def visualize_predictions(
             pred_rotation = quaternion_to_rotation_matrix(pred_quaternion)[0].cpu().numpy()
             pred_quat = pred_quaternion[0].cpu().numpy()
             
-            # Get ground truth per questa immagine
+            # Estrazione ground truth per questa immagine
             img_idx = int(img_name)
             if img_idx in gt_data:
                 gt_info = gt_data[img_idx][0]  # Primo oggetto
@@ -353,12 +358,12 @@ def visualize_predictions(
                 gt_quat = np.array(gt_info['quaternion'])
                 
                 # Draw GROUND TRUTH (verde)
-                img = draw_3d_bbox_colored(img, gt_rotation, gt_translation, K, obj_id, models_info, color=(0, 255, 0))
-                img = draw_axis_colored(img, gt_rotation, gt_translation, K, scale=0.05, colors=[(0, 200, 0), (0, 255, 0), (0, 180, 0)])
+                img = draw_3d_bbox_colored(img, gt_rotation, gt_translation, cam_k, obj_id, models_info, color=(0, 255, 0))
+                img = draw_axis_colored(img, gt_rotation, gt_translation, cam_k, scale=0.05, colors=[(0, 200, 0), (0, 255, 0), (0, 180, 0)])
                 
                 # Draw PREDICTION (ciano/blu)
-                img = draw_3d_bbox_colored(img, pred_rotation, pred_translation, K, obj_id, models_info, color=(255, 165, 0))
-                img = draw_axis_colored(img, pred_rotation, pred_translation, K, scale=0.05, colors=[(255, 100, 0), (255, 165, 0), (200, 130, 0)])
+                img = draw_3d_bbox_colored(img, pred_rotation, pred_translation, cam_k, obj_id, models_info, color=(255, 165, 0))
+                img = draw_axis_colored(img, pred_rotation, pred_translation, cam_k, scale=0.05, colors=[(255, 100, 0), (255, 165, 0), (200, 130, 0)])
                 
                 # Print confronto numerico
                 print(f"\n Object {obj_id} (Class {class_id})")

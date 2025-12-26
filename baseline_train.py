@@ -188,7 +188,7 @@ def train(
                 # Forward
                 pred_quaternion = model(cropped_img)
                 
-                # Calcola translation da bbox + diametro
+                # La translazioe è calcolata con bbox e diametro
                 bbox_xyxy = torch.stack([
                     bbox_base[:, 0],
                     bbox_base[:, 1],
@@ -243,3 +243,4 @@ def train(
             print(f"✓ Saved best model")
             
     print("\nTraining completed!")
+    return model
