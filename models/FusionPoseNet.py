@@ -67,7 +67,7 @@ class FusionPoseNet(nn.Module):
             nn.Linear(fusion_dim, 1024),
             nn.LayerNorm(1024), # meglio rispetto la batchnorm nell'MLP
             nn.ReLU(),
-            nn.Dropout(0.1)
+            nn.Dropout(0.5)
         )
         
         # Head Rotazione (Quaternioni)

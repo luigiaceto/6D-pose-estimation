@@ -44,8 +44,8 @@ class RGBDDatasetPose(CustomDatasetPose):
 
         # in training applico data augmentation alla depth
         if self.split == 'train':
-            noise = torch.randn_like(depth_tensor) * 0.003 # +/- 3mm di rumore
-            mask = torch.rand_like(depth_tensor) > 0.02 # 2% dei pixel persi
+            noise = torch.randn_like(depth_tensor) * 0.005 # +/- 3mm di rumore
+            mask = torch.rand_like(depth_tensor) > 0.10 # 10% dei pixel persi
             depth_tensor = (depth_tensor + noise) * mask
 
         depth_tensor = depth_tensor.unsqueeze(0) # Aggiungi canale: (1, 224, 224)

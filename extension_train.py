@@ -146,10 +146,12 @@ def train(
     
     for epoch in range(epochs):
         print(f"Epoch {epoch+1}")
+
+        lr_backbone = optimizer.param_groups[0]['lr'] # Gruppo RGB
+        lr_head = optimizer.param_groups[1]['lr']     # Gruppo Depth/Fusion (prendiamo l'indice 1 come esempio)
         
-        # Stampa LR corrente (utile per debug)
-        current_lr = optimizer.param_groups[0]['lr']
-        print(f"Current LR: {current_lr:.8f}")
+        print(f"LR Backbone (RGB): {lr_backbone:.8f}")
+        print(f"LR Heads (Fusion): {lr_head:.8f}")
 
         if epoch == freeze_epochs:
             # ATTENZIONE: nel caso si utilizzi unfreezing forse converrebbe
@@ -161,14 +163,14 @@ def train(
             
         train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, device)
         print(
-            f"Train Loss: {train_avg_metrics['total_loss_avg']:.4f} "
+            f"  Train Loss: {train_avg_metrics['total_loss_avg']:.4f} "
             f"(Rot loss: {train_avg_metrics['rot_loss_avg']:.4f}, Transaltion Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm)"
         )
 
         val_avg_metrics = validate(model, val_loader, criterion, device)
         print(
-            f"Val Loss: {val_avg_metrics['total_loss_avg']:.4f} "
-            f"(Rot loss: {val_avg_metrics['rot_loss_avg']:.4f}, Translation Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm)\n"
+            f"  Val Loss: {val_avg_metrics['total_loss_avg']:.4f} "
+            f"(Rot loss: {val_avg_metrics['rot_loss_avg']:.4f}, Translation Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm)"
         )
         
         scheduler.step()
@@ -188,3 +190,4 @@ def train(
             save_path = str(Path(checkpoint_dir) / "best_fusion_model.pt")
             torch.save(checkpoint_dict, save_path)
             print(f"Checkpoint salvato: {save_path} (Loss: {best_loss:.4f})")
+        print("\n")
