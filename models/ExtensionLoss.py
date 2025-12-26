@@ -14,8 +14,8 @@ class RGBDPoseLoss(nn.Module):
         self.lambda_rot = lambda_rot
         self.lambda_trans = lambda_trans
         
-        # Loss L1 per la traslazione (forse meglio nn.SmoothL1Loss(beta=1.0) ???)
-        self.trans_loss_fn = nn.L1Loss() 
+        # Loss L1 per la traslazione (forse meglio nn.SmoothL1Loss(beta=1.0) rispetto nn.L1Loss ???)
+        self.trans_loss_fn = nn.SmoothL1Loss(beta=1.0)
 
     def compute_rot_loss(self, pred_q, gt_q):
         """

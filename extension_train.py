@@ -21,7 +21,7 @@ def train_one_epoch(
     rotation_loss_sum = 0
     translation_error_cm_sum = 0
     
-    pbar = tqdm(loader, desc="Training")
+    pbar = tqdm(loader, desc="**Training**")
     for batch in pbar:
         # Sposta dati su GPU
         rgb = batch['cropped_img'].to(device)
@@ -70,7 +70,7 @@ def validate(model, loader, criterion, device):
     translation_error_cm_sum = 0
     
     with torch.no_grad():
-        for batch in tqdm(loader, desc="Validation"):
+        for batch in tqdm(loader, desc="**Validation**"):
             rgb = batch['cropped_img'].to(device)
             depth = batch['cropped_depth'].to(device)
             bbox_center = batch['bbox_center_pixel'].to(device)
@@ -109,11 +109,23 @@ def train(
     model = FusionPoseNet(cam_k=cam_k).to(device)
 
     criterion = RGBDPoseLoss(
-        lambda_rot=20.0,
-        lambda_trans=1.0
+        lambda_rot=10.0,
+        lambda_trans=10.0
     ) # ???
+
+    params = [
+        # Gruppo 1: La backbone RGB (già pre-addestrata) -> LR molto basso
+        {'params': model.rgb_backbone.parameters(), 'lr': 1e-5}, 
+        
+        # Gruppo 2: Tutto il resto (DepthEncoder, Heads, Fusion) -> LR standard
+        {'params': model.depth_backbone.parameters(), 'lr': lr},
+        {'params': model.fusion_fc.parameters(), 'lr': lr},
+        {'params': model.rot_head.parameters(), 'lr': lr},
+        {'params': model.z_head.parameters(), 'lr': lr}
+    ]
+
     optimizer = optim.AdamW(
-        model.parameters(),
+        params,
         lr=lr,
         weight_decay=weight_decay
     )
@@ -152,7 +164,7 @@ def train(
         val_avg_metrics = validate(model, val_loader, criterion, device)
         print(
             f"Val Loss: {val_avg_metrics['total_loss_avg']:.4f} "
-            f"(Rot loss: {val_avg_metrics['rot_loss_avg']:.4f}, Translation Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm)"
+            f"(Rot loss: {val_avg_metrics['rot_loss_avg']:.4f}, Translation Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm)\n"
         )
         
         scheduler.step()
