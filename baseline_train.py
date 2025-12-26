@@ -98,8 +98,8 @@ def train(
             return 1.0
         warmup_scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_lambda)
     
-    # Setup Mixed Precision
-    scaler = torch.amp.GradScaler('cuda', enabled=True)
+    # Setup Mixed Precision (enabled con LR basso + clipping aggressivo)
+    scaler = torch.amp.GradScaler('cuda', enabled=False)
     best_val_loss = float('inf')
     
     # Training loop
@@ -121,16 +121,16 @@ def train(
             print(f"  [Warmup] LR: {current_lr:.6f}")
         
         for batch in tqdm(train_loader, desc="Training"):
-            cropped_img = batch['cropped_img'].to(device)
-            gt_quaternion = batch['quaternion'].to(device)
-            gt_translation = batch['translation'].to(device)
-            bbox_base = batch['bbox_base'].to(device)
-            obj_id = batch['obj_id'].to(device).long()
+            cropped_img = batch['cropped_img'].to(device, non_blocking=True)
+            gt_quaternion = batch['quaternion'].to(device, non_blocking=True)
+            gt_translation = batch['translation'].to(device, non_blocking=True)
+            bbox_base = batch['bbox_base'].to(device, non_blocking=True)
+            obj_id = batch['obj_id'].to(device, non_blocking=True).long()
             
             optimizer.zero_grad()
             
             # Forward pass with optional AMP
-            with torch.amp.autocast(device_type="cuda", enabled=True):
+            with torch.amp.autocast(device_type="cuda", enabled=False):
                 # Forward: ResNet predice SOLO quaternion
                 pred_quaternion = model(cropped_img)
                 
@@ -164,7 +164,8 @@ def train(
             # Backward with optional AMP
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            # Gradient clipping aggressivo per stabilità FP16
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 10.0)
             scaler.step(optimizer)
             scaler.update()
             
@@ -178,11 +179,11 @@ def train(
         
         with torch.no_grad():
             for batch in tqdm(val_loader, desc="Validation"):
-                cropped_img = batch['cropped_img'].to(device)
-                gt_quaternion = batch['quaternion'].to(device)
-                gt_translation = batch['translation'].to(device)
-                bbox_base = batch['bbox_base'].to(device)
-                obj_id = batch['obj_id'].to(device).long()
+                cropped_img = batch['cropped_img'].to(device, non_blocking=True)
+                gt_quaternion = batch['quaternion'].to(device, non_blocking=True)
+                gt_translation = batch['translation'].to(device, non_blocking=True)
+                bbox_base = batch['bbox_base'].to(device, non_blocking=True)
+                obj_id = batch['obj_id'].to(device, non_blocking=True).long()
                 
                 # Forward
                 pred_quaternion = model(cropped_img)

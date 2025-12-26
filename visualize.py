@@ -237,7 +237,7 @@ def visualize_predictions(
     cam_k,
     image_path,
     yolo_checkpoint=str(Path("checkpoints") / "best.pt"),
-    pose_checkpoint=str(Path("checkpoints") / "best_pose_model_with_stats.pt"),
+    pose_checkpoint=str(Path("checkpoints") / "best_pose_model.pt"),
     device='cuda',
     figsize=(12, 8),
     show_gt=True
