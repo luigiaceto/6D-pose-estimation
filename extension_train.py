@@ -56,8 +56,8 @@ def train_one_epoch(
     
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
-        'rotation_loss_avg': rotation_loss_sum / len(loader),
-        'translation_error_cm_avg': translation_error_cm_sum / len(loader)
+        'rot_loss_avg': rotation_loss_sum / len(loader),
+        'trans_err_cm_avg': translation_error_cm_sum / len(loader)
     }
 
     return avg_metrics
@@ -89,8 +89,8 @@ def validate(model, loader, criterion, device):
 
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
-        'rotation_loss_avg': rotation_loss_sum / len(loader),
-        'translation_error_cm_avg': translation_error_cm_sum / len(loader)
+        'rot_loss_avg': rotation_loss_sum / len(loader),
+        'trans_error_cm_avg': translation_error_cm_sum / len(loader)
     }
 
     return avg_metrics
@@ -146,13 +146,13 @@ def train(
         train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, device)
         print(
             f"Train Loss: {train_avg_metrics['total_loss_avg']:.4f} "
-            f"(Rot loss: {train_avg_metrics['rot_loss_avg']:.4f}, Transaltion Err: {train_avg_metrics['trans_error_cm_avg']:.2f} cm)"
+            f"(Rot loss: {train_avg_metrics['rot_loss_avg']:.4f}, Transaltion Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm)"
         )
 
         val_avg_metrics = validate(model, val_loader, criterion, device)
         print(
             f"Val Loss: {val_avg_metrics['total_loss_avg']:.4f} "
-            f"(Rot loss: {val_avg_metrics['rot_loss_avg']:.4f}, Translation Err: {val_avg_metrics['trans_error_cm_avg']:.2f} cm)"
+            f"(Rot loss: {val_avg_metrics['rot_loss_avg']:.4f}, Translation Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm)"
         )
         
         scheduler.step()
