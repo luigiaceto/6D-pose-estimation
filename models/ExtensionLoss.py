@@ -17,6 +17,15 @@ class RGBDPoseLoss(nn.Module):
         # Loss L1 per la traslazione (forse meglio nn.SmoothL1Loss(beta=1.0) rispetto nn.L1Loss ???)
         self.trans_loss_fn = nn.SmoothL1Loss(beta=1.0)
 
+        # PARAMETRI LEARNABLE
+        # Inizializziamo a -2.0 o 0.0. Rappresentano log(sigma^2).
+        # Un valore negativo iniziale dà un peso iniziale alto alle loss,
+        # costringendo la rete a imparare velocemente all'inizio.
+        self.s_rot = nn.Parameter(torch.tensor(-2.0), requires_grad=True)
+        self.s_trans = nn.Parameter(torch.tensor(-2.0), requires_grad=True)
+
+    # non risolve problemi per gli oggetti 'simmetrici', occorrerebbe usare la
+    # ADD ma diventa molto pesante il training ???
     def compute_rot_loss(self, pred_q, gt_q):
         """
         Calcola la distanza angolare tra quaternioni.
@@ -54,7 +63,9 @@ class RGBDPoseLoss(nn.Module):
         
         # --- Loss Totale Pesata ---
         # Somma pesata delle due componenti
-        total_loss = (self.lambda_rot * loss_r) + (self.lambda_trans * loss_t)
+        weighted_loss_r = torch.exp(-self.s_rot) * loss_r + self.s_rot
+        weighted_loss_t = torch.exp(-self.s_trans) * loss_t + self.s_trans
+        total_loss = weighted_loss_r + weighted_loss_t
         
         # --- Metriche per Logging (Senza gradienti) ---
         # Calcoliamo l'errore in cm solo per stamparlo a video
@@ -66,7 +77,7 @@ class RGBDPoseLoss(nn.Module):
         
         return {
             'total_loss': total_loss,           # Tensor (per .backward())
-            'rot_loss': loss_r.detach(),          # Float (per print/log)
-            'trans_loss': loss_t.detach(),        # Float (per print/log)
+            'rot_loss': loss_r.detach(),        # Float (per print/log)
+            'trans_loss': loss_t.detach(),      # Float (per print/log)
             'trans_err_cm': error_cm.detach()   # Float (per capire quanto sbaglia in cm)
         }

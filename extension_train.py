@@ -111,19 +111,23 @@ def train(
     criterion = RGBDPoseLoss(
         lambda_rot=10.0,
         lambda_trans=10.0
-    ) # ???
+    ).to(device) # se uso alfa e beta non-learnable non serve lambda_rot/trans
 
     params = [
-        # Gruppo 1: La backbone RGB (già pre-addestrata) -> LR molto basso
+        # Gruppo 1: La backbone RGB (già pre-addestrata) -> Learning Rate molto basso
         {'params': model.rgb_backbone.parameters(), 'lr': 1e-5}, 
         
-        # Gruppo 2: Tutto il resto (DepthEncoder, Heads, Fusion) -> LR standard
+        # Gruppo 2: Tutto il resto (DepthEncoder, Heads, Fusion) -> Learning Rate normale
         {'params': model.depth_backbone.parameters(), 'lr': lr},
         {'params': model.fusion_fc.parameters(), 'lr': lr},
         {'params': model.rot_head.parameters(), 'lr': lr},
-        {'params': model.z_head.parameters(), 'lr': lr}
+        {'params': model.z_head.parameters(), 'lr': lr},
+
+        # Gruppo 3: i parametri della loss
+        {'params': criterion.parameters(), 'lr': lr}
     ]
 
+    # sto applicando bene il lr differenziale ???
     optimizer = optim.AdamW(
         params,
         lr=lr,
