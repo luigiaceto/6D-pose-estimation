@@ -66,7 +66,7 @@ class RGBDPoseLoss(nn.Module):
         
         return {
             'total_loss': total_loss,           # Tensor (per .backward())
-            'rot_loss': loss_r.detatch(),          # Float (per print/log)
-            'trans_loss': loss_t.detatch(),        # Float (per print/log)
-            'trans_err_cm': error_cm.detatch()   # Float (per capire quanto sbaglia in cm)
+            'rot_loss': loss_r.detach(),          # Float (per print/log)
+            'trans_loss': loss_t.detach(),        # Float (per print/log)
+            'trans_err_cm': error_cm.detach()   # Float (per capire quanto sbaglia in cm)
         }
