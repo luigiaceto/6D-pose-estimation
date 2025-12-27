@@ -4,7 +4,7 @@ Funzioni di visualizzazione per 6D pose.
 
 from pathlib import Path
 from PIL import Image
-import tqdm
+from tqdm import tqdm
 import cv2
 import numpy as np
 import torch
