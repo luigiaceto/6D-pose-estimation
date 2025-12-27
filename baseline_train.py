@@ -69,7 +69,6 @@ def train(
         optimizer, 
         T_max=epochs,      # Arriva al minimo esatto all'ultima epoca
         eta_min=1e-6,      # Non andare a zero assoluto
-        verbose=False
     )
 
     # Warmup
