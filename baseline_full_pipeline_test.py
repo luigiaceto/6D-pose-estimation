@@ -17,9 +17,13 @@ from models.ResNetPose import ResNetPose, quaternion_to_rotation_matrix
 from models.PinholeCamera import PinholeCamera
 import torchvision.transforms as transforms
 from utils.data_exploration import get_class_names
-from baseline_evaluate import compute_add_metric, compute_add_rotation_only, compute_add_s_metric, compute_add_s_rotation_only, compute_rotation_error, compute_translation_error
+from baseline_evaluate import (
+    compute_add_metric, compute_add_rotation_only, 
+    compute_add_s_metric, compute_add_s_rotation_only, 
+    compute_rotation_error, compute_translation_error,
+    load_model_points, print_evaluation_results_table
+)
 from torch.utils.data import DataLoader
-from baseline_evaluate import load_model_points
 
 
 def evaluate_pipeline_batch1(
@@ -100,13 +104,11 @@ def evaluate_pipeline_batch1(
         results = yolo(rgb_yolo, verbose=False)[0]
         boxes= results.boxes
         
-        yolo_cls_gt = objid_to_yolo[gt_obj_id]
-        valid_idx = np.where(cls == yolo_cls_gt)[0]
-        
-        #valid = boxes[0]  # oppure class_map[obj_id]
+        # Get class predictions
         cls = boxes.cls.cpu().numpy()
         conf = boxes.conf.cpu().numpy()
         
+        yolo_cls_gt = objid_to_yolo[gt_obj_id]
         valid_idx = np.where(cls == yolo_cls_gt)[0]
         if len(valid_idx) == 0:
             print("YOLO non rileva l'oggetto GT")
