@@ -71,9 +71,9 @@ def evaluate_pipeline_batch1(
     for batch in tqdm(test_loader):
 
         # =============================
-        # 1. INPUT & GT
+        # 1. INPUT & GT 
         # =============================
-        rgb = batch["rgb"][0].permute(1,2,0).cpu().numpy()   # (H,W,3)
+        rgb = batch["rgb"][0].permute(1,2,0).cpu().numpy()   # (H,W,3), batch size=1 
         obj_id = int(batch["obj_id"][0])
         gt_R = batch["rotation"][0].cpu().numpy()
         gt_t = batch["translation"][0].cpu().numpy()
@@ -86,16 +86,24 @@ def evaluate_pipeline_batch1(
         results = yolo(rgb, verbose=False)[0]
 
         if len(results.boxes) == 0:
+            print("YOLO non rileva boxes, No detection")
             continue
 
-        # prendi bbox con conf max
-        i = results.boxes.conf.argmax()
+        # prendi bbox della classe di riferimento
+
+        boxes = results.boxes
+        cls = boxes.cls.cpu().numpy()
+        conf = boxes.conf.cpu().numpy()
+
+        valid = np.where(cls == obj_id)[0]  # oppure class_map[obj_id]
+
+        if len(valid) == 0:
+            print("YOLO non rileva boxes della classe richiesta, No detection")
+            continue
+
+        i = valid[conf[valid].argmax()]
         x_c, y_c, w, h = results.boxes.xywh[i].cpu().numpy()
-        pred_class = int(results.boxes.cls[i])
-
-        if pred_class + 1 != obj_id:
-            continue  # detection sbagliata
-
+        
         # =============================
         # 3. CROP
         # =============================
@@ -109,6 +117,7 @@ def evaluate_pipeline_batch1(
 
         crop = rgb[y_min:y_max, x_min:x_max]
         if crop.size == 0:
+            print("Crop vuoto, skipping")
             continue
 
         # =============================
