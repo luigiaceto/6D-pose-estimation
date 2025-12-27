@@ -94,21 +94,21 @@ def evaluate_pipeline_batch1(
         
         rgb= rgb_tensor.permute(1,2,0).cpu().numpy().astype(np.uint8)
         H, W, _ = rgb.shape
-        
+
         # prendi bbox della classe di riferimento
 
         boxes = results.boxes
         cls = boxes.cls.cpu().numpy()
         conf = boxes.conf.cpu().numpy()
-
-        valid = np.where(cls == obj_id)[0]  # oppure class_map[obj_id]
+        # probabilmente predice solo un box ed è sufficiente fare restults.boxes[0]
+        valid = boxes[0]  # oppure class_map[obj_id]
 
         if len(valid) == 0:
             print("YOLO non rileva boxes della classe richiesta, No detection")
             continue
 
-        i = valid[conf[valid].argmax()]
-        x_c, y_c, w, h = results.boxes.xywh[i].cpu().numpy()
+        
+        x_c, y_c, w, h = valid.xywh[0].cpu().numpy()
         
         # =============================
         # 3. CROP
