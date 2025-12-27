@@ -65,8 +65,11 @@ def train(
         )
     
     # Scheduler
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=5, min_lr=1e-7, verbose=True
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, 
+        T_max=epochs,      # Arriva al minimo esatto all'ultima epoca
+        eta_min=1e-6,      # Non andare a zero assoluto
+        verbose=False
     )
 
     # Warmup
@@ -208,7 +211,7 @@ def train(
         print(f"Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Avg Rot Error: {avg_rot_error:.2f}°")
         
         # Scheduler Step
-        scheduler.step(avg_val_loss)
+        scheduler.step()
         
         if warmup_scheduler is not None and epoch < warmup_epochs:
             warmup_scheduler.step()

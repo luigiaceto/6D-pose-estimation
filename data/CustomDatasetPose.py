@@ -71,24 +71,17 @@ class CustomDatasetPose(Dataset):
                 # 1. Color Jitter: Meno aggressivo su Brightness/Contrast
                 # LINEMOD ha luci controllate. Se scurisci troppo, perdi i dettagli dell'oggetto.
                 transforms.ColorJitter(
-                    brightness=0.25,      # Prima era 0.4 (troppo alto)
-                    contrast=0.25,        # Prima era 0.3 (troppo alto)
-                    saturation=0.3,       # Ok, il colore è importante
+                    brightness=0.2,      # Prima era 0.4 (troppo alto)
+                    contrast=0.2,        # Prima era 0.3 (troppo alto)
+                    saturation=0.2,       # Ok, il colore è importante
                     hue=0.05              # Ridotto da 0.1 -> 0.05 (non cambiare troppo il colore degli oggetti!)
                 ),
                 
                 # 2. Grayscale: Ok per robustezza
-                transforms.RandomGrayscale(p=0.15),
-                
-                # 3. Blur: Meno aggressivo
-                # Sigma max 2.0 su un'immagine 224x224 la rende un purè. 1.0 mantiene i bordi.
-                transforms.RandomApply(
-                    [transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.0))], # Prima era (0.1, 2.0)
-                    p=0.2
-                ),
+                transforms.RandomGrayscale(p=0.1),
                 
                 # 4. Prospettiva: Utile per simulare viste diverse
-                transforms.RandomPerspective(distortion_scale=0.2, p=0.3),
+                transforms.RandomPerspective(distortion_scale=0.3, p=0.4),
                 
                 # --- NOTA: RIMOSSO RandomRotation(degrees=5) ---
                 # Come discusso: ruotare l'immagine senza ruotare il target quaternion
@@ -97,8 +90,8 @@ class CustomDatasetPose(Dataset):
                 transforms.ToTensor(),
                 
                 # 5. Occlusioni: Simula oggetti davanti
-                transforms.RandomErasing(p=0.1, scale=(0.02, 0.1)),
-                
+                transforms.RandomErasing(p=0.3, scale=(0.02, 0.15), ratio=(0.3, 3.3)),      
+                          
                 transforms.Normalize(
                     mean=self.image_mean,
                     std=self.image_std
