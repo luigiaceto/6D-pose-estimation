@@ -34,12 +34,12 @@ class ResNetPose(nn.Module):
         # Include BatchNorm e Dropout leggero (0.1)
         self.fc_layers_r = nn.Sequential(
             nn.Linear(feature_dim, 1024),
-            nn.LayerNorm(1024),         # <--- CAMBIATO da BN a LN
+            nn.BatchNorm1d(1024),
             nn.ReLU(),
-            nn.Dropout(0.1),            # Dropout leggero va bene con LN
+            nn.Dropout(0.1),
 
             nn.Linear(1024, 256),
-            nn.LayerNorm(256),          # <--- MANTENUTO LN
+            nn.BatchNorm1d(256),
             nn.ReLU()
         )
 

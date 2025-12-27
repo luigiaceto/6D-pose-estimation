@@ -222,11 +222,13 @@ def evaluate(
         class_diameter_cm = object_diameters[class_id] / 10.0
         class_threshold = 0.1 * class_diameter_cm
         class_accuracy = np.mean(class_add_errors < class_threshold) * 100
+        class_add_rotation_only_accuracy = np.mean(class_add_rotation_only_errors < class_threshold) * 100
         
         per_class_results.append({
         'class_id': class_id,
         'num_samples': len(metrics),
         'accuracy_10p': class_accuracy,
+        'add_rot_only_accuracy': class_add_rotation_only_accuracy,
         'rot_mean': class_rot_errors.mean(),
         'trans_mean': class_trans_errors.mean(),
         'add_mean': class_add_errors.mean(),
@@ -234,10 +236,14 @@ def evaluate(
         })
     
     # add total avg last row
+    all_add_rotation_only_np = np.array(all_add_rotation_only)
+    accuracy_rotation_only = np.mean(all_add_rotation_only_np < threshold_10) * 100
+    
     per_class_results.append({
         'class_id': 'ALL',
         'num_samples': len(all_add),
         'accuracy_10p': accuracy,
+        'add_rot_only_accuracy': accuracy_rotation_only,
         'rot_mean': np.mean(all_rot_errors),
         'trans_mean': np.mean(all_trans_errors),
         'add_mean': np.mean(all_add),
@@ -275,10 +281,11 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
         'object_name': 'Object Name',
         'num_samples': '#Samples',
         'accuracy_10p': 'Accuracy @10% (%)',
+        'add_rot_only_accuracy': 'ADD-R Accuracy @10% (%)',
         'rot_mean': 'Rotation Error (deg)',
         'trans_mean': 'Translation Error (cm)',
         'add_mean': 'ADD / ADD-S (cm)',
-        'add_rot_only_mean': ' ADD (rot only) (cm)',
+        'add_rot_only_mean': 'ADD-R (cm)',
     })
 
     df = df[
@@ -286,10 +293,11 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
             'Object Name',
             '#Samples',
             'Accuracy @10% (%)',
+            'ADD-R Accuracy @10% (%)',
             'Rotation Error (deg)',
             'Translation Error (cm)',
             'ADD / ADD-S (cm)',
-            ' ADD (rot only) (cm)',
+            'ADD-R (cm)',
         ]
     ]
 

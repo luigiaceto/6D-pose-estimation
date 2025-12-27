@@ -24,10 +24,14 @@ def train(
     weight_decay=1e-6,
     device='cuda',
     freeze_epochs=0,
-    warmup_epochs=3
+    warmup_epochs=3,
+    resume_from_checkpoint=None
 ):
     """
     Training del modello di pose estimation (Versione Finale).
+    
+    Args:
+        resume_from_checkpoint: Path to checkpoint to resume training from (optional)
     """
     
     os.makedirs(checkpoint_dir, exist_ok=True)
@@ -65,11 +69,9 @@ def train(
         )
     
     # Scheduler
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, 
-        T_max=epochs,      # Arriva al minimo esatto all'ultima epoca
-        eta_min=1e-6,      # Non andare a zero assoluto
-    )
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=0.5, patience=5, min_lr=1e-7, verbose=True
+        )
 
     # Warmup
     warmup_scheduler = None
@@ -85,9 +87,22 @@ def train(
     scaler = torch.amp.GradScaler('cuda', enabled=USE_AMP)
     
     best_val_loss = float('inf')
+    start_epoch = 0
+    
+    # Resume from checkpoint if specified
+    if resume_from_checkpoint is not None and os.path.exists(resume_from_checkpoint):
+        print(f"Resuming from checkpoint: {resume_from_checkpoint}")
+        checkpoint = torch.load(resume_from_checkpoint, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        start_epoch = checkpoint['epoch'] + 1
+        best_val_loss = checkpoint.get('val_loss', float('inf'))
+        print(f"Resuming from epoch {start_epoch}, best val loss: {best_val_loss:.4f}")
+    
     print(f"Mixed Precision (AMP): {'ENABLED' if USE_AMP else 'DISABLED'}")
     
-    for epoch in range(epochs):
+    for epoch in range(start_epoch, epochs):
         print(f"\nEpoch {epoch+1}/{epochs}")
         
         # Unfreeze logic
@@ -210,7 +225,7 @@ def train(
         print(f"Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Avg Rot Error: {avg_rot_error:.2f}°")
         
         # Scheduler Step
-        scheduler.step()
+        scheduler.step(avg_val_loss)
         
         if warmup_scheduler is not None and epoch < warmup_epochs:
             warmup_scheduler.step()
