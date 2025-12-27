@@ -73,22 +73,28 @@ def evaluate_pipeline_batch1(
         # =============================
         # 1. INPUT & GT 
         # =============================
-        rgb = batch["rgb"][0].permute(1,2,0).cpu().numpy()   # (H,W,3), batch size=1 
+        rgb_tensor = batch["rgb"][0]
         obj_id = int(batch["obj_id"][0])
         gt_R = batch["rotation"][0].cpu().numpy()
         gt_t = batch["translation"][0].cpu().numpy()
 
-        H, W, _ = rgb.shape
+    
 
         # =============================
         # 2. YOLO
         # =============================
-        results = yolo(rgb, verbose=False)[0]
+        rgb_yolo = (rgb_tensor * 255).byte()   # ora uint8 3xHxW
+        rgb_yolo = rgb_yolo.permute(1,2,0)     # HxWx3
+        rgb_yolo = rgb_yolo.cpu().numpy()      # numpy array pronto per YOLO
+        results = yolo(rgb_yolo, verbose=False)[0]
 
         if len(results.boxes) == 0:
             print("YOLO non rileva boxes, No detection")
             continue
-
+        
+        rgb= rgb_tensor.permute(1,2,0).cpu().numpy().astype(np.uint8)
+        H, W, _ = rgb.shape
+        
         # prendi bbox della classe di riferimento
 
         boxes = results.boxes
@@ -114,6 +120,7 @@ def evaluate_pipeline_batch1(
 
         x_min, y_min = max(0,x_min), max(0,y_min)
         x_max, y_max = min(W,x_max), min(H,y_max)
+
 
         crop = rgb[y_min:y_max, x_min:x_max]
         if crop.size == 0:
