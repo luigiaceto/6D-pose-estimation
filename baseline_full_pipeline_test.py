@@ -19,7 +19,7 @@ import torchvision.transforms as transforms
 from utils.data_exploration import get_class_names
 from baseline_evaluate import compute_add_metric, compute_add_rotation_only, compute_add_s_metric, compute_add_s_rotation_only, compute_rotation_error, compute_translation_error
 from torch.utils.data import DataLoader
-from baseline_evaluate import load_model_points, print_evaluation_results_table
+from baseline_evaluate import load_model_points
 
 
 def evaluate_pipeline_batch1(
@@ -100,11 +100,12 @@ def evaluate_pipeline_batch1(
         results = yolo(rgb_yolo, verbose=False)[0]
         boxes= results.boxes
         
-        # Extract class and confidence first
+        yolo_cls_gt = objid_to_yolo[gt_obj_id]
+        valid_idx = np.where(cls == yolo_cls_gt)[0]
+        
+        #valid = boxes[0]  # oppure class_map[obj_id]
         cls = boxes.cls.cpu().numpy()
         conf = boxes.conf.cpu().numpy()
-        
-        yolo_cls_gt = objid_to_yolo[gt_obj_id]
         
         valid_idx = np.where(cls == yolo_cls_gt)[0]
         if len(valid_idx) == 0:
@@ -273,5 +274,4 @@ def evaluate_pipeline_batch1(
             'add_mean': np.mean(all_add),
             'add_rot_only_mean': np.mean(add_rot_only),
             })
-    print_evaluation_results_table(per_class_results)
-    return per_class_results  
+    print_evaluation_results_table(per_class_results)  
