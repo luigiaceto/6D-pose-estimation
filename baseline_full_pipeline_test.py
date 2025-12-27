@@ -36,9 +36,9 @@ def evaluate_pipeline_batch1(
     #checkpoint = torch.load(pose_checkpoint, map_location=device)
     
     checkpoint = torch.load(
-    pose_checkpoint,
-    map_location=device,
-    weights_only=False
+        pose_checkpoint,
+        map_location=device,
+        weights_only=False
     )
 
     pose_model = ResNetPose().to(device)
@@ -52,10 +52,10 @@ def evaluate_pipeline_batch1(
 
     # test dataloader with batch size=1
     test_loader = DataLoader(
-    test_dataset,
-    batch_size=1,
-    shuffle=False,
-    num_workers=0
+        test_dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=0
     )
 
     # --------------------------------------------------
