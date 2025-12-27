@@ -126,20 +126,6 @@ def draw_3d_bbox(img, R, t, K, obj_id, models_info):
 
 def draw_3d_bbox_colored(img, R, t, K, obj_id, models_info, color=(255, 255, 0)):
     """Versione con colore personalizzabile per GT vs Pred."""
-    
-    # K può essere: [fx, fy, cx, cy], matrice 3x3, o array 1D con 9 elementi (appiattito)
-    if K.ndim == 1:
-        if len(K) == 4:
-            fx, fy, cx, cy = K
-        elif len(K) == 9:
-            fx, fy, cx, cy = K[0], K[4], K[2], K[5]
-        else:
-            raise ValueError(f"Array 1D deve avere 4 o 9 elementi, trovato {len(K)}")
-    elif K.ndim == 2 and K.shape == (3, 3):
-        fx, fy, cx, cy = K[0,0], K[1,1], K[0,2], K[1,2]
-    else:
-        raise ValueError(f"K deve essere [fx, fy, cx, cy], matrice 3x3, o array appiattito, trovato shape {K.shape}")
-    
     info = models_info[obj_id]
     min_x, min_y, min_z = info['min_x'], info['min_y'], info['min_z']
     size_x, size_y, size_z = info['size_x'], info['size_y'], info['size_z']
