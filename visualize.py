@@ -260,9 +260,11 @@ def visualize_predictions(
 
     # Load ground truth per confronto
     import re
-    match = re.search(r'data/(\d+)/rgb/(\d+)\.png', image_path)
+    # Normalizza path per funzionare su Windows e Linux
+    normalized_path = image_path.replace('\\', '/')
+    match = re.search(r'data/(\d+)/rgb/(\d+)\.png', normalized_path)
     if not match:
-        raise ValueError("Path immagine non valido")
+        raise ValueError(f"Path immagine non valido: {image_path}")
     
     obj_folder = match.group(1)
     img_name = match.group(2)

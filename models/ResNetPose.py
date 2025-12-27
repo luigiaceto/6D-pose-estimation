@@ -44,6 +44,30 @@ class ResNetPose(nn.Module):
         )
 
         self.quaternion_head = nn.Linear(256, 4)
+        
+        # Inizializzazione custom per stabilità numerica con FP16/AMP
+        self._init_weights()
+    
+    def _init_weights(self):
+        """Inizializzazione Xavier/Kaiming per layer custom."""
+        for m in [self.fc_layers_r, self.quaternion_head]:
+            for layer in m.modules():
+                if isinstance(layer, nn.Linear):
+                    # Xavier uniform per layer intermedi
+                    nn.init.xavier_uniform_(layer.weight, gain=1.0)
+                    if layer.bias is not None:
+                        nn.init.constant_(layer.bias, 0.0)
+                elif isinstance(layer, nn.BatchNorm1d):
+                    nn.init.constant_(layer.weight, 1.0)
+                    nn.init.constant_(layer.bias, 0.0)
+        
+        # Quaternion head: inizializzazione speciale per output normalizzato
+        # Usa gain piccolo per evitare grandi valori iniziali
+        nn.init.xavier_uniform_(self.quaternion_head.weight, gain=0.01)
+        # Bias iniziale: quaternion identità [1, 0, 0, 0]
+        nn.init.constant_(self.quaternion_head.bias, 0.0)
+        with torch.no_grad():
+            self.quaternion_head.bias[0] = 1.0  # w=1 (identità)
     
     def forward(self, x):
         """

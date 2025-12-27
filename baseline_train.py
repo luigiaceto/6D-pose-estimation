@@ -1,13 +1,3 @@
-"""
-Training script per 6D Pose Estimation.
-
-Pipeline:
-1. YOLO (già trainato) -> bounding box
-2. Crop immagine
-3. ResNet -> quaternion + centro 2D + depth
-4. Pinhole model -> translation 3D da (centro 2D, depth)
-"""
-
 import os
 from pathlib import Path
 import torch
@@ -19,6 +9,8 @@ from models.ResNetPose import ResNetPose
 from models.PinholeCamera import PinholeCamera
 from models.losses import PoseLoss
 
+# Import necessario per la conversione (se serve in futuro per ADD metric completa)
+from models.ResNetPose import quaternion_to_rotation_matrix 
 
 def train(
     train_dataset,
@@ -26,25 +18,24 @@ def train(
     val_loader,
     cam_k,
     checkpoint_dir='checkpoints',
-    checkpoint_name = 'best_pose_model.pt',
-    epochs=50,
+    checkpoint_name='best_pose_model.pt',
+    epochs=100,
     lr=1e-4,
-    weight_decay=1e-5,
+    weight_decay=1e-6,
     device='cuda',
-    freeze_epochs=0, # epoche dopo le quali scongelare la backbone (pretrainata)
-    warmup_epochs = 3
+    freeze_epochs=0,
+    warmup_epochs=3
 ):
     """
-    Training del modello di pose estimation.
+    Training del modello di pose estimation (Versione Finale).
     """
     
     os.makedirs(checkpoint_dir, exist_ok=True)
     
     pinhole = PinholeCamera(cam_k)
     
-    # Get object diameters from dataset
+    # Lookup table diametri
     object_diameters = train_dataset.get_object_diameters()
-    # Create a tensor lookup [obj_id] -> diameter (much faster than list comprehension!)
     max_obj_id = max(object_diameters.keys())
     diameter_lookup = torch.zeros(max_obj_id + 1, device=device, dtype=torch.float32)
     for obj_id, diameter in object_diameters.items():
@@ -53,43 +44,32 @@ def train(
     # Model
     model = ResNetPose().to(device)
     
-    # Setup loss: Hybrid di default
-    criterion = PoseLoss(
-        lambda_rotation=1.0, 
-        lambda_translation=0.0,
-    )
+    # Loss
+    criterion = PoseLoss(lambda_rotation=1.0, lambda_translation=0.0)
 
-    # Setup optimizer con parameter groups per freeze logic migliore
-    # Invece di ricreare optimizer (perdi momentum), usiamo groups con requires_grad
+    # Optimizer
     if freeze_epochs > 0:
-        # Inizia con backbone frozen
         model.freeze_backbone()
         print(f"Backbone frozen per {freeze_epochs} epochs")
-        
-        # Optimizer con parameter groups: backbone ha LR più basso quando unfrozen
         optimizer = optim.AdamW([
             {'params': model.backbone.parameters(), 'lr': lr / 10, 'weight_decay': weight_decay},
             {'params': model.fc_layers_r.parameters(), 'lr': lr, 'weight_decay': weight_decay},
             {'params': model.quaternion_head.parameters(), 'lr': lr, 'weight_decay': weight_decay}
         ])
     else:
-        # No freeze: usa AdamW con weight_decay corretto
         optimizer = optim.AdamW(
             model.parameters(),
             lr=lr,
-            weight_decay=weight_decay
+            weight_decay=weight_decay,
+            betas=(0.9, 0.999)
         )
     
-    
-    # Cosine Annealing: smooth decay da lr iniziale a lr minimo
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=epochs,
-        eta_min=1e-6
+    # Scheduler
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=5, min_lr=1e-7, verbose=True
     )
 
-    
-    # Setup warmup scheduler
+    # Warmup
     warmup_scheduler = None
     if warmup_epochs > 0:
         def warmup_lambda(epoch):
@@ -98,27 +78,27 @@ def train(
             return 1.0
         warmup_scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_lambda)
     
-    # Setup Mixed Precision (enabled con LR basso + clipping aggressivo)
-    scaler = torch.amp.GradScaler('cuda', enabled=False)
-    best_val_loss = float('inf')
+    # AMP Setup
+    USE_AMP = True 
+    scaler = torch.amp.GradScaler('cuda', enabled=USE_AMP)
     
-    # Training loop
+    best_val_loss = float('inf')
+    print(f"Mixed Precision (AMP): {'ENABLED' if USE_AMP else 'DISABLED'}")
+    
     for epoch in range(epochs):
         print(f"\nEpoch {epoch+1}/{epochs}")
         
-        # Unfreeze backbone dopo freeze_epochs (senza ricreare optimizer)
+        # Unfreeze logic
         if epoch == freeze_epochs and freeze_epochs > 0:
             model.unfreeze_backbone()
-            print("Backbone unfrozen - parameter groups mantengono momentum!")
+            print("Backbone unfrozen")
         
-        # Train
+        # --- TRAINING PHASE ---
         model.train()
         train_losses = []
         
-        # Apply warmup scheduler for first N epochs
         if warmup_scheduler is not None and epoch < warmup_epochs:
-            current_lr = optimizer.param_groups[0]['lr']
-            print(f"  [Warmup] LR: {current_lr:.6f}")
+            print(f"  [Warmup] LR: {optimizer.param_groups[0]['lr']:.6f}")
         
         for batch in tqdm(train_loader, desc="Training"):
             cropped_img = batch['cropped_img'].to(device, non_blocking=True)
@@ -127,19 +107,16 @@ def train(
             bbox_base = batch['bbox_base'].to(device, non_blocking=True)
             obj_id = batch['obj_id'].to(device, non_blocking=True).long()
             
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             
-            # Forward pass with optional AMP
-            with torch.amp.autocast(device_type="cuda", enabled=False):
-                # Forward: ResNet predice SOLO quaternion
-                pred_quaternion = model(cropped_img)
+            with torch.amp.autocast(device_type="cuda", enabled=USE_AMP):
+                # 1. Prediction (Già normalizzata dentro ResNetPose)
+                pred_quaternion = model(cropped_img) 
                 
-                # Calcola translation 3D usando geometria
+                # 2. Geometria
                 bbox_xyxy = torch.stack([
-                    bbox_base[:, 0],
-                    bbox_base[:, 1],
-                    bbox_base[:, 0] + bbox_base[:, 2],
-                    bbox_base[:, 1] + bbox_base[:, 3]
+                    bbox_base[:, 0], bbox_base[:, 1],
+                    bbox_base[:, 0] + bbox_base[:, 2], bbox_base[:, 1] + bbox_base[:, 3]
                 ], dim=1)
                 
                 center_2d_pixels = torch.stack([
@@ -151,21 +128,18 @@ def train(
                 depth = pinhole.compute_depth_from_bbox(bbox_xyxy, batch_diameters)
                 pred_translation = pinhole.unproject_2d_to_3d(center_2d_pixels, depth)
                 
-                # Loss (con class_ids per hybrid mode)
+                # 3. Loss
                 losses = criterion(
-                    pred_quaternion,
-                    pred_translation,
-                    gt_quaternion,
-                    gt_translation,
+                    pred_quaternion, pred_translation,
+                    gt_quaternion, gt_translation,
                     class_ids=obj_id
                 )
                 loss = losses['total_loss']
             
-            # Backward with optional AMP
+            # Backward & Step
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
-            # Gradient clipping aggressivo per stabilità FP16
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 10.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             scaler.step(optimizer)
             scaler.update()
             
@@ -173,9 +147,10 @@ def train(
         
         avg_train_loss = np.mean(train_losses)
         
-        # Validation
+        # --- VALIDATION PHASE ---
         model.eval()
         val_losses = []
+        val_rot_errors = [] # Lista per accumulare gli errori in gradi
         
         with torch.no_grad():
             for batch in tqdm(val_loader, desc="Validation"):
@@ -185,62 +160,72 @@ def train(
                 bbox_base = batch['bbox_base'].to(device, non_blocking=True)
                 obj_id = batch['obj_id'].to(device, non_blocking=True).long()
                 
-                # Forward
+                # Forward (Già normalizzata dentro ResNetPose)
                 pred_quaternion = model(cropped_img)
                 
-                # La translazioe è calcolata con bbox e diametro
+                # Calcoli geometrici (necessari per la loss)
                 bbox_xyxy = torch.stack([
-                    bbox_base[:, 0],
-                    bbox_base[:, 1],
-                    bbox_base[:, 0] + bbox_base[:, 2],
-                    bbox_base[:, 1] + bbox_base[:, 3]
+                    bbox_base[:, 0], bbox_base[:, 1],
+                    bbox_base[:, 0] + bbox_base[:, 2], bbox_base[:, 1] + bbox_base[:, 3]
                 ], dim=1)
-                
                 center_2d_pixels = torch.stack([
                     (bbox_xyxy[:, 0] + bbox_xyxy[:, 2]) / 2,
                     (bbox_xyxy[:, 1] + bbox_xyxy[:, 3]) / 2
                 ], dim=1)
-
-                batch_diameters = diameter_lookup[obj_id]  # Fast GPU indexing!
-                
+                batch_diameters = diameter_lookup[obj_id]
                 depth = pinhole.compute_depth_from_bbox(bbox_xyxy, batch_diameters)
                 pred_translation = pinhole.unproject_2d_to_3d(center_2d_pixels, depth)
                 
-                # Loss (con class_ids per hybrid mode)
+                # Loss calculation
                 losses = criterion(
-                    pred_quaternion,
-                    pred_translation,
-                    gt_quaternion,
-                    gt_translation,
+                    pred_quaternion, pred_translation,
+                    gt_quaternion, gt_translation,
                     class_ids=obj_id
                 )
-                
                 val_losses.append(losses['total_loss'].item())
+
+                # --- NUOVO: Monitoraggio Errore Rotazione (Gradi) ---
+                # Monitoriamo l'errore medio di rotazione in gradi:
+                # Formula: 2 * acos(|<q1, q2>|) * 180 / pi
+                
+                # Calcolo prodotto scalare (clamped per stabilità numerica)
+                dot_prod = torch.abs(torch.sum(pred_quaternion * gt_quaternion, dim=1))
+                dot_prod = torch.clamp(dot_prod, -1.0, 1.0)
+                
+                # Distanza angolare in radianti
+                angular_dist_rad = 2 * torch.acos(dot_prod)
+                
+                # Converti in gradi e calcola media del batch
+                angular_dist_deg = torch.rad2deg(angular_dist_rad).mean().item()
+                
+                val_rot_errors.append(angular_dist_deg)
+                # ----------------------------------------------------
         
         avg_val_loss = np.mean(val_losses)
+        avg_rot_error = np.mean(val_rot_errors) # Errore medio in gradi dell'epoca
         
-        print(f"Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
+        # Stampa aggiornata con l'errore di rotazione
+        print(f"Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Avg Rot Error: {avg_rot_error:.2f}°")
         
-        # Step scheduler
-        scheduler.step()  # Cosine: step every epoch
+        # Scheduler Step
+        scheduler.step(avg_val_loss)
         
-        # Step warmup scheduler (first N epochs)
         if warmup_scheduler is not None and epoch < warmup_epochs:
             warmup_scheduler.step()
         
-        # Save best model
+        # Save Best
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
-            
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
                 'lr': lr,
-                'val_loss': avg_val_loss
+                'val_loss': avg_val_loss,
+                'rot_error': avg_rot_error # Salviamo anche l'errore per riferimento
             }, str(Path(checkpoint_dir) / f"{checkpoint_name}"))
-            print(f"✓ Saved best model")
+            print(f"✓ Saved best model (Err: {avg_rot_error:.2f}°)")
             
     print("\nTraining completed!")
     return model

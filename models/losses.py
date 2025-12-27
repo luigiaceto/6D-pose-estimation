@@ -31,14 +31,14 @@ class PoseLoss(nn.Module):
         
         Usa torch.abs per gestire double cover (q e -q sono la stessa rotazione).
         """
-        # Normalize con epsilon per stabilità numerica
-        q1 = F.normalize(q1, p=2, dim=1, eps=1e-8)
-        q2 = F.normalize(q2, p=2, dim=1, eps=1e-8)
+        # Normalize con epsilon sicuro
+        q1 = F.normalize(q1, p=2, dim=1, eps=1e-6)
+        q2 = F.normalize(q2, p=2, dim=1, eps=1e-6)
         
         # Dot product con abs per gestire q = -q
         dot = torch.abs(torch.sum(q1 * q2, dim=1))
-        # Clamp per evitare NaN in acos o problemi numerici
-        dot = torch.clamp(dot, -1.0 + 1e-6, 1.0 - 1e-6)
+        # Clamp per sicurezza (non dovrebbe servire con abs)
+        dot = torch.clamp(dot, 0.0, 1.0)
         
         return torch.mean(1.0 - dot)
     
@@ -70,18 +70,20 @@ class PoseLoss(nn.Module):
         # Trace di R_diff
         trace = R_diff[:, 0, 0] + R_diff[:, 1, 1] + R_diff[:, 2, 2]  # (B,)
         
-        # Geodesic angle: arccos((trace - 1) / 2)
-        eps = 1e-6
+        # FORMULAZIONE PIÙ STABILE: usa sin invece di arccos
+        # arccos è sensibile vicino a ±1, sin è molto più stabile
+        # Formula alternativa: sin(θ/2) = sqrt((1 - cos(θ))/2)
         cos_angle = (trace - 1.0) / 2.0
-        # Clamp più aggressivo per evitare NaN
-        cos_angle = torch.clamp(cos_angle, -1.0 + eps, 1.0 - eps)
         
-        angle = torch.acos(cos_angle)  # Angolo in radianti [0, π]
+        # Clamp aggressivo per evitare sqrt di negativi
+        cos_angle = torch.clamp(cos_angle, -1.0, 1.0)
         
-        # NORMALIZZAZIONE: Dividi per π per avere range [0, 1]. Questo rende la loss compatibile con Quaternion Loss nell'Hybrid mode
-        normalized_loss = angle / math.pi
+        # sin(θ/2) = sqrt((1 - cos(θ))/2) - MOLTO più stabile di arccos!
+        sin_half = torch.sqrt((1.0 - cos_angle) / 2.0 + 1e-7)
         
-        return torch.mean(normalized_loss)
+        # Loss: sin(θ/2) è già in [0, 1] per θ in [0, π]
+        # Questo è equivalente a geodesic ma numericamente stabile
+        return torch.mean(sin_half)
     
     def forward(self, pred_quat, pred_trans, gt_quat, gt_trans, class_ids=None):
         """
