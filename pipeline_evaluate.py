@@ -33,7 +33,14 @@ def evaluate_pipeline_batch1(
     # --------------------------------------------------
     yolo = YOLO(yolo_checkpoint)
 
-    checkpoint = torch.load(pose_checkpoint, map_location=device)
+    #checkpoint = torch.load(pose_checkpoint, map_location=device)
+    
+    checkpoint = torch.load(
+    pose_checkpoint,
+    map_location=device,
+    weights_only=False
+    )
+
     pose_model = ResNetPose().to(device)
     pose_model.load_state_dict(checkpoint["model_state_dict"])
     pose_model.eval()
