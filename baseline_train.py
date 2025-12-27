@@ -28,10 +28,7 @@ def train(
     resume_from_checkpoint=None
 ):
     """
-    Training del modello di pose estimation (Versione Finale).
-    
-    Args:
-        resume_from_checkpoint: Path to checkpoint to resume training from (optional)
+    Training del modello di pose estimation (Versione Finale - Parallel Optimized).
     """
     
     os.makedirs(checkpoint_dir, exist_ok=True)
@@ -45,20 +42,38 @@ def train(
     for obj_id, diameter in object_diameters.items():
         diameter_lookup[obj_id] = diameter
     
-    # Model
+    # Model Setup
     model = ResNetPose().to(device)
-    
-    # Loss
-    criterion = PoseLoss(lambda_rotation=1.0, lambda_translation=0.0)
 
-    # Optimizer
+    # --- AGGIUNTA PER GESTIRE IL FREEZE PRIMA DEL PARALLELO ---
+    # Gestiamo il freeze prima di wrappare il modello, così accediamo ai metodi diretti
     if freeze_epochs > 0:
         model.freeze_backbone()
         print(f"Backbone frozen per {freeze_epochs} epochs")
+
+    # --- ATTIVAZIONE TURBO: PARALLEL GPU ---
+    if torch.cuda.device_count() > 1:
+        print(f"🚀 Turbo Mode: Using {torch.cuda.device_count()} GPUs!")
+        model = torch.nn.DataParallel(model)
+    # ---------------------------------------
+
+    # Loss
+    criterion = PoseLoss(lambda_rotation=1.0, lambda_translation=0.0)
+
+    # Optimizer (Nota: DataParallel non cambia model.parameters(), quindi questo resta uguale)
+    # Dobbiamo però stare attenti ad accedere ai parametri corretti se frozen
+    
+    # Funzione helper per recuperare il modello "reale" (dentro o fuori DataParallel)
+    def get_raw_model(m):
+        return m.module if hasattr(m, 'module') else m
+
+    raw_model = get_raw_model(model) # Riferimento al modello base per accedere ai layer specifici
+
+    if freeze_epochs > 0:
         optimizer = optim.AdamW([
-            {'params': model.backbone.parameters(), 'lr': lr / 10, 'weight_decay': weight_decay},
-            {'params': model.fc_layers_r.parameters(), 'lr': lr, 'weight_decay': weight_decay},
-            {'params': model.quaternion_head.parameters(), 'lr': lr, 'weight_decay': weight_decay}
+            {'params': raw_model.backbone.parameters(), 'lr': lr / 10, 'weight_decay': weight_decay},
+            {'params': raw_model.fc_layers_r.parameters(), 'lr': lr, 'weight_decay': weight_decay},
+            {'params': raw_model.quaternion_head.parameters(), 'lr': lr, 'weight_decay': weight_decay}
         ])
     else:
         optimizer = optim.AdamW(
@@ -89,11 +104,16 @@ def train(
     best_val_loss = float('inf')
     start_epoch = 0
     
-    # Resume from checkpoint if specified
+    # Resume from checkpoint
     if resume_from_checkpoint is not None and os.path.exists(resume_from_checkpoint):
         print(f"Resuming from checkpoint: {resume_from_checkpoint}")
         checkpoint = torch.load(resume_from_checkpoint, map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'])
+        
+        # Gestione caricamento pesi su DataParallel
+        # Se il checkpoint era single-gpu e ora siamo multi-gpu (o viceversa), le chiavi potrebbero non combaciare
+        # Soluzione semplice: carichiamo sempre sul raw_model
+        get_raw_model(model).load_state_dict(checkpoint['model_state_dict'])
+        
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         start_epoch = checkpoint['epoch'] + 1
@@ -105,9 +125,9 @@ def train(
     for epoch in range(start_epoch, epochs):
         print(f"\nEpoch {epoch+1}/{epochs}")
         
-        # Unfreeze logic
+        # Unfreeze logic (Safe for DataParallel)
         if epoch == freeze_epochs and freeze_epochs > 0:
-            model.unfreeze_backbone()
+            get_raw_model(model).unfreeze_backbone() # <--- FIX QUI
             print("Backbone unfrozen")
         
         # --- TRAINING PHASE ---
@@ -127,7 +147,7 @@ def train(
             optimizer.zero_grad(set_to_none=True)
             
             with torch.amp.autocast(device_type="cuda", enabled=USE_AMP):
-                # 1. Prediction (Già normalizzata dentro ResNetPose)
+                # 1. Prediction (DataParallel divide questo batch sulle 2 GPU automaticamente!)
                 pred_quaternion = model(cropped_img) 
                 
                 # 2. Geometria
@@ -167,7 +187,7 @@ def train(
         # --- VALIDATION PHASE ---
         model.eval()
         val_losses = []
-        val_rot_errors = [] # Lista per accumulare gli errori in gradi
+        val_rot_errors = []
         
         with torch.no_grad():
             for batch in tqdm(val_loader, desc="Validation"):
@@ -177,10 +197,10 @@ def train(
                 bbox_base = batch['bbox_base'].to(device, non_blocking=True)
                 obj_id = batch['obj_id'].to(device, non_blocking=True).long()
                 
-                # Forward (Già normalizzata dentro ResNetPose)
+                # Forward (Parallelizzato)
                 pred_quaternion = model(cropped_img)
                 
-                # Calcoli geometrici (necessari per la loss)
+                # Calcoli geometrici
                 bbox_xyxy = torch.stack([
                     bbox_base[:, 0], bbox_base[:, 1],
                     bbox_base[:, 0] + bbox_base[:, 2], bbox_base[:, 1] + bbox_base[:, 3]
@@ -193,7 +213,7 @@ def train(
                 depth = pinhole.compute_depth_from_bbox(bbox_xyxy, batch_diameters)
                 pred_translation = pinhole.unproject_2d_to_3d(center_2d_pixels, depth)
                 
-                # Loss calculation
+                # Loss
                 losses = criterion(
                     pred_quaternion, pred_translation,
                     gt_quaternion, gt_translation,
@@ -201,46 +221,34 @@ def train(
                 )
                 val_losses.append(losses['total_loss'].item())
 
-                # --- NUOVO: Monitoraggio Errore Rotazione (Gradi) ---
-                # Monitoriamo l'errore medio di rotazione in gradi:
-                # Formula: 2 * acos(|<q1, q2>|) * 180 / pi
-                
-                # Calcolo prodotto scalare (clamped per stabilità numerica)
+                # Monitoraggio Errore Rotazione
                 dot_prod = torch.abs(torch.sum(pred_quaternion * gt_quaternion, dim=1))
                 dot_prod = torch.clamp(dot_prod, -1.0, 1.0)
-                
-                # Distanza angolare in radianti
                 angular_dist_rad = 2 * torch.acos(dot_prod)
-                
-                # Converti in gradi e calcola media del batch
                 angular_dist_deg = torch.rad2deg(angular_dist_rad).mean().item()
-                
                 val_rot_errors.append(angular_dist_deg)
-                # ----------------------------------------------------
         
         avg_val_loss = np.mean(val_losses)
-        avg_rot_error = np.mean(val_rot_errors) # Errore medio in gradi dell'epoca
+        avg_rot_error = np.mean(val_rot_errors)
         
-        # Stampa aggiornata con l'errore di rotazione
         print(f"Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Avg Rot Error: {avg_rot_error:.2f}°")
         
-        # Scheduler Step
         scheduler.step(avg_val_loss)
         
         if warmup_scheduler is not None and epoch < warmup_epochs:
             warmup_scheduler.step()
         
-        # Save Best
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
+            # Salviamo sempre il raw_model per compatibilità futura
             torch.save({
                 'epoch': epoch,
-                'model_state_dict': model.state_dict(),
+                'model_state_dict': get_raw_model(model).state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
                 'lr': lr,
                 'val_loss': avg_val_loss,
-                'rot_error': avg_rot_error # Salviamo anche l'errore per riferimento
+                'rot_error': avg_rot_error
             }, str(Path(checkpoint_dir) / f"{checkpoint_name}"))
             print(f"✓ Saved best model (Err: {avg_rot_error:.2f}°)")
             
