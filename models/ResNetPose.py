@@ -39,7 +39,7 @@ class ResNetPose(nn.Module):
             nn.Dropout(0.1),
 
             nn.Linear(1024, 256),
-            nn.BatchNorm1d(256),
+            nn.LayerNorm(256),   # LN invece di BN
             nn.ReLU()
         )
 
