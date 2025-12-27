@@ -79,7 +79,7 @@ class CustomDatasetPose(Dataset):
                 
                 # 2. Grayscale: Ok per robustezza
                 transforms.RandomGrayscale(p=0.15),
-                transforms.RandomApply([transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.0))], p=0.15),
+                # transforms.RandomApply([transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.0))], p=0.15),
                 
                 transforms.ToTensor(),
                 
