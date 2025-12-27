@@ -35,9 +35,9 @@ def evaluate_pipeline_batch1(
     yolo = YOLO(yolo_checkpoint)
 
     checkpoint = torch.load(
-        pose_checkpoint,
-        map_location=device,
-        weights_only=False
+            pose_checkpoint,
+            map_location=device,
+            weights_only=False
         )
     pose_model = ResNetPose().to(device)
     pose_model.load_state_dict(checkpoint["model_state_dict"])
@@ -65,10 +65,10 @@ def evaluate_pipeline_batch1(
     yolo_to_objid = {i: obj_id for i, obj_id in enumerate(linemod_ids)}
 
     test_loader= DataLoader(
-        test_dataset,
-        batch_size=1,
-        shuffle=False,
-        num_workers=4,
+            test_dataset,
+            batch_size=1,
+            shuffle=False,
+            num_workers=4,
         pin_memory=True
     ) 
 
