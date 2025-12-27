@@ -246,7 +246,8 @@ def visualize_predictions(
 
     # Load ground truth per confronto
     import re
-    match = re.search(r'data/(\d+)/rgb/(\d+)\.png', image_path)
+    # Support both forward slash and backslash (Windows compatibility)
+    match = re.search(r'data[/\\](\d+)[/\\]rgb[/\\](\d+)\.png', image_path)
     if not match:
         raise ValueError("Path immagine non valido")
     

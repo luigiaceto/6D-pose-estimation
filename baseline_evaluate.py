@@ -97,7 +97,6 @@ def evaluate(
     all_object_ids = []  # Per breakdown per oggetto
     all_diameters = []   # Per calcolare accuracy @ 10%
     
-    IMG_WIDTH, IMG_HEIGHT = 640, 480
 
     # collect metrics per classe
     per_class_metrics= defaultdict(list)
@@ -223,21 +222,30 @@ def evaluate(
         class_threshold = 0.1 * class_diameter_cm
         class_accuracy = np.mean(class_add_errors < class_threshold) * 100
         
+        # ADD-R accuracy @ 10% diameter (rotation only)
+        class_add_r_accuracy = np.mean(class_add_rotation_only_errors < class_threshold) * 100
+        
         per_class_results.append({
         'class_id': class_id,
         'num_samples': len(metrics),
         'accuracy_10p': class_accuracy,
+        'add_r_accuracy_10p': class_add_r_accuracy,
         'rot_mean': class_rot_errors.mean(),
         'trans_mean': class_trans_errors.mean(),
         'add_mean': class_add_errors.mean(),
         'add_rot_only_mean': class_add_rotation_only_errors.mean(),
         })
     
+    # ADD-R accuracy @ 10% diameter (rotation only)
+    all_add_rot_only_np = np.array(all_add_rotation_only)
+    add_r_accuracy = np.mean(all_add_rot_only_np < threshold_10) * 100
+    
     # add total avg last row
     per_class_results.append({
         'class_id': 'ALL',
         'num_samples': len(all_add),
         'accuracy_10p': accuracy,
+        'add_r_accuracy_10p': add_r_accuracy,
         'rot_mean': np.mean(all_rot_errors),
         'trans_mean': np.mean(all_trans_errors),
         'add_mean': np.mean(all_add),
@@ -269,12 +277,19 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
     }
 
     df = pd.DataFrame(metrics_per_class)
+    
+    # Sort by class_id (keep 'ALL' at the end)
+    df_all = df[df['class_id'] == 'ALL']
+    df_classes = df[df['class_id'] != 'ALL'].sort_values('class_id')
+    df = pd.concat([df_classes, df_all], ignore_index=True)
+    
     df['Object Name'] = df['class_id'].map(LINEMOD_OBJECT_NAMES)
     df = df.drop(columns=['class_id'])
     df = df.rename(columns={
         'object_name': 'Object Name',
         'num_samples': '#Samples',
         'accuracy_10p': 'Accuracy @10% (%)',
+        'add_r_accuracy_10p': 'ADD-R Accuracy @10% (%)',
         'rot_mean': 'Rotation Error (deg)',
         'trans_mean': 'Translation Error (cm)',
         'add_mean': 'ADD / ADD-S (cm)',
@@ -286,6 +301,7 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
             'Object Name',
             '#Samples',
             'Accuracy @10% (%)',
+            'ADD-R Accuracy @10% (%)',
             'Rotation Error (deg)',
             'Translation Error (cm)',
             'ADD / ADD-S (cm)',
