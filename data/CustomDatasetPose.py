@@ -71,22 +71,15 @@ class CustomDatasetPose(Dataset):
                 # 1. Color Jitter: Meno aggressivo su Brightness/Contrast
                 # LINEMOD ha luci controllate. Se scurisci troppo, perdi i dettagli dell'oggetto.
                 transforms.ColorJitter(
-                    brightness=0.25,      # Prima era 0.4 (troppo alto)
-                    contrast=0.25,        # Prima era 0.3 (troppo alto)
-                    saturation=0.3,       # Ok, il colore è importante
-                    hue=0.05              # Ridotto da 0.1 -> 0.05 (non cambiare troppo il colore degli oggetti!)
+                    brightness=0.25,      
+                    contrast=0.25,        
+                    saturation=0.3,       
+                    hue=0.05             
                 ),
                 
                 # 2. Grayscale: Ok per robustezza
                 transforms.RandomGrayscale(p=0.15),
                 transforms.RandomApply([transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.0))], p=0.15),
-                
-                # 4. Prospettiva: Utile per simulare viste diverse
-                transforms.RandomPerspective(distortion_scale=0.2, p=0.3),
-                
-                # --- NOTA: RIMOSSO RandomRotation(degrees=5) ---
-                # Come discusso: ruotare l'immagine senza ruotare il target quaternion
-                # confonde la rete. La rotazione è gestita dal dataset 3D.
                 
                 transforms.ToTensor(),
                 
