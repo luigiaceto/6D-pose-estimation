@@ -68,27 +68,19 @@ class CustomDatasetPose(Dataset):
 
             # AUGMENTATION OTTIMIZZATA PER LINEMOD (Dataset Piccolo)
             self.transform_crop = transforms.Compose([
-                # 1. Color Jitter: Meno aggressivo su Brightness/Contrast
-                # LINEMOD ha luci controllate. Se scurisci troppo, perdi i dettagli dell'oggetto.
+                # PER IL RESIZE FORZATO (stretch)
                 transforms.ColorJitter(
-                    brightness=0.3,   
-                    contrast=0.25,    
-                    saturation=0.3,   
-                    hue=0.05         
+                    brightness=0.3,
+                    contrast=0.2,
+                    saturation=0.2,
+                    hue=0.05
                 ),
-                # 2. Grayscale: Ok per robustezza
-                transforms.RandomGrayscale(p=0.15),
-                # transforms.RandomApply([transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.0))], p=0.15),
-                
+                transforms.RandomGrayscale(p=0.1),
+                transforms.RandomApply(
+                    [transforms.GaussianBlur(kernel_size=3)],
+                    p=0.1
+                ),
                 transforms.ToTensor(),
-                
-                # 5. Occlusioni: Simula oggetti davanti
-                transforms.RandomErasing(
-                    p=0.15,             # Probabilità moderata
-                    scale=(0.02, 0.1),  # Cancella piccoli patch (2% - 10% dell'immagine)
-                    ratio=(0.3, 3.3)
-                ),   
-                                      
                 transforms.Normalize(
                     mean=self.image_mean,
                     std=self.image_std
