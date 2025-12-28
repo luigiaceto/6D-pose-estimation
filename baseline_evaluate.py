@@ -21,6 +21,33 @@ from models.ResNetPose import ResNetPose, quaternion_to_rotation_matrix
 from models.PinholeCamera import PinholeCamera
 from models.losses import compute_add_metric, compute_add_rotation_only, compute_add_s_metric, compute_add_s_rotation_only
 
+# --- COSTANTI GLOBALI DI MAPPING ---
+
+# 1. Nomi per visualizzazione umana
+LINEMOD_OBJECT_NAMES = {
+    1: "ape", 2: "benchvise", 4: "camera", 5: "can", 6: "cat",
+    8: "driller", 9: "duck", 10: "eggbox", 11: "glue",
+    12: "holepuncher", 13: "iron", 14: "lamp", 15: "phone",
+    "ALL": "ALL"
+}
+
+# 2. Traduzione da YOLO (0,1,2...) a LINEMOD (1,2,4...)
+# Questa mappa è specifica per come è stato addestrato il tuo YOLO attuale
+YOLO_TO_LINEMOD_MAP = {
+    0: 1,   # "01" -> ape
+    1: 2,   # "02" -> benchvise
+    2: 4,   # "04" -> camera (SALTO ID 3)
+    3: 5,   # "05" -> can
+    4: 6,   # "06" -> cat
+    5: 8,   # "08" -> driller (SALTO ID 7)
+    6: 9,   # "09" -> duck
+    7: 10,  # "10" -> eggbox
+    8: 11,  # "11" -> glue
+    9: 12,  # "12" -> holepuncher
+    10: 13, # "13" -> iron
+    11: 14, # "14" -> lamp
+    12: 15  # "15" -> phone
+}
 
 def load_model_points(dataset_root, obj_id):
     """Carica corner points 3D del modello."""
@@ -256,25 +283,6 @@ def evaluate(
 
 
 def print_evaluation_results_table(metrics_per_class, save_table=False, table_path="evaluation_results.csv"):
-    
-    LINEMOD_OBJECT_NAMES = {
-    1: "ape",
-    2: "benchvise",
-    3: "bowl",
-    4: "camera",
-    5: "can",
-    6: "cat",
-    7: "cup",
-    8: "driller",
-    9: "duck",
-    10: "eggbox",
-    11: "glue",
-    12: "holepuncher",
-    13: "iron",
-    14: "lamp",
-    15: "phone",
-    "ALL": "ALL"
-    }
 
     df = pd.DataFrame(metrics_per_class)
     
