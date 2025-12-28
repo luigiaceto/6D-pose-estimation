@@ -63,20 +63,37 @@ class CustomDatasetPose(Dataset):
 
         # Define image transformations for the baseline
         # Define image transformations for the baseline
-    
         if self.split == 'train':
-            self.transform_img = transforms.Compose([
-                                transforms.ToTensor(),  # convert to float32
-                                # transforms.Normalize(mean=self.image_mean, std=self.image_std) # YOLO fa la normalizzazione automatica
-                            ])
+            self.transform_img = transforms.ToTensor()
 
+            # AUGMENTATION OTTIMIZZATA PER LINEMOD (Dataset Piccolo)
             self.transform_crop = transforms.Compose([
-                                transforms.ColorJitter(brightness=0.3, contrast=0.2, saturation=0.2, hue=0.05),
-                                transforms.RandomGrayscale(p=0.1),
-                                transforms.RandomApply([transforms.GaussianBlur(kernel_size=3)], p=0.1),
-                                transforms.ToTensor(),
-                                transforms.Normalize(mean=self.image_mean, std=self.image_std) # normalize images according to the values found
-                            ])
+                # 1. Color Jitter: Meno aggressivo su Brightness/Contrast
+                # LINEMOD ha luci controllate. Se scurisci troppo, perdi i dettagli dell'oggetto.
+                transforms.ColorJitter(
+                    brightness=0.3,   
+                    contrast=0.25,    
+                    saturation=0.3,   
+                    hue=0.05         
+                ),
+                # 2. Grayscale: Ok per robustezza
+                transforms.RandomGrayscale(p=0.15),
+                # transforms.RandomApply([transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.0))], p=0.15),
+                
+                transforms.ToTensor(),
+                
+                # 5. Occlusioni: Simula oggetti davanti
+                transforms.RandomErasing(
+                    p=0.15,             # Probabilità moderata
+                    scale=(0.02, 0.1),  # Cancella piccoli patch (2% - 10% dell'immagine)
+                    ratio=(0.3, 3.3)
+                ),   
+                                      
+                transforms.Normalize(
+                    mean=self.image_mean,
+                    std=self.image_std
+                )
+            ])
         else:
             # Validation/Test: Nessuna augmentation, solo resize e normalize
             self.transform_img = transforms.ToTensor()
