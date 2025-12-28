@@ -253,14 +253,14 @@ def evaluate(
         class_add_r_accuracy = np.mean(class_add_rotation_only_errors < class_threshold) * 100
         
         per_class_results.append({
-        'class_id': class_id,
-        'num_samples': len(metrics),
-        'accuracy_10p': class_accuracy,
-        'add_r_accuracy_10p': class_add_r_accuracy,
-        'rot_mean': class_rot_errors.mean(),
-        'trans_mean': class_trans_errors.mean(),
-        'add_mean': class_add_errors.mean(),
-        'add_rot_only_mean': class_add_rotation_only_errors.mean(),
+            'class_id': class_id,
+            'num_samples': len(metrics),
+            'accuracy_10p': class_accuracy,
+            'add_r_accuracy_10p': class_add_r_accuracy,
+            'rot_mean': class_rot_errors.mean(),
+            'trans_mean': class_trans_errors.mean(),
+            'add_mean': class_add_errors.mean(),
+            'add_rot_only_mean': class_add_rotation_only_errors.mean()
         })
     
     # ADD-R accuracy @ 10% diameter (rotation only)
@@ -313,7 +313,7 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
             'Rotation Error (deg)',
             'Translation Error (cm)',
             'ADD / ADD-S (cm)',
-            ' ADD (rot only) (cm)',
+            'ADD (rot only) (cm)',
         ]
     ]
 
