@@ -4,4 +4,4 @@ __pycache__
 domande.md
 datasets/
 runs/
-checkpoints/
+checkpoints/best_pose_model.pt
