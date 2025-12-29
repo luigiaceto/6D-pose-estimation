@@ -62,10 +62,13 @@ class CustomDatasetPose(Dataset):
         self.image_std = torch.tensor([0.229, 0.224, 0.225])
 
         # Define image transformations for the baseline
+        # Define image transformations for the baseline
         if self.split == 'train':
             self.transform_img = transforms.ToTensor()
 
+            # AUGMENTATION OTTIMIZZATA PER LINEMOD (Dataset Piccolo)
             self.transform_crop = transforms.Compose([
+                # PER IL RESIZE FORZATO (stretch)
                 transforms.ColorJitter(
                     brightness=0.3,
                     contrast=0.2,
@@ -84,6 +87,8 @@ class CustomDatasetPose(Dataset):
                 )
             ])
         else:
+            # Validation/Test: Nessuna augmentation, solo resize e normalize
+            self.transform_img = transforms.ToTensor()
             self.transform_img = transforms.ToTensor()
 
             self.transform_crop = transforms.Compose([
@@ -176,34 +181,88 @@ class CustomDatasetPose(Dataset):
         img = Image.open(img_path).convert("RGB")
         return self.transform_img(img)
 
-    # APPLICARE ANCHE RANDOM JITTER AL BBOX GROUND TRUTH ???
     def load_cropped_image(self, img_path, bbox):
-        """
-        Load an RGB image, crop it, resize/pad and return it.
-        """
-        img = Image.open(img_path).convert("RGB")
-        x, y, w, h = bbox
+            """
+            Load an RGB image, crop it, resize/pad and return it.
+            
+            MODIFICA: Applica random jitter al bbox durante il training per simulare 
+            l'imperfezione di YOLO e rendere la rete più robusta.
+            """
+            img = Image.open(img_path).convert("RGB")
+            img_w, img_h = img.size # Dimensioni originali immagine (es. 640x480)
+            
+            x, y, w, h = bbox
 
-        # crop iniziale dell'immagine secondo il ground truth bounding box
-        cropped_img = img.crop((x, y, x+w, y+h)) # give as input the coordinates for left, top, right, bottom
+            # --- INIZIO MODIFICA: BBox Jittering ---
+            # Lo facciamo solo in training per Data Augmentation
+            if self.split == 'train':
+                # 1. Random Scale (zoom in/out del +/- 10%)
+                # Simula YOLO che fa box leggermente più grandi o piccoli del vero
+                scale_factor = np.random.uniform(0.9, 1.1) 
+                w_new = w * scale_factor
+                h_new = h * scale_factor
 
-        w_crop, h_crop = cropped_img.size
-        max_dim = max(w_crop, h_crop)
+                # 2. Random Shift (spostamento centro +/- 10% della dimensione)
+                # Simula YOLO che non centra perfettamente l'oggetto
+                center_x = x + w / 2
+                center_y = y + h / 2
+                
+                shift_x = (np.random.rand() - 0.5) * 0.2 * w # +/- 10% larghezza
+                shift_y = (np.random.rand() - 0.5) * 0.2 * h # +/- 10% altezza
+                
+                center_x_new = center_x + shift_x
+                center_y_new = center_y + shift_y
 
-        # creiamo una nuova immagine quadrata nera (o media dataset).
-        # Background nero (0,0,0) va bene se normalizzi dopo
-        square_img = Image.new('RGB', (max_dim, max_dim), (0, 0, 0))
+                # 3. Ricalcolo angolo in alto a sinistra (x, y) dal nuovo centro
+                x_new = center_x_new - w_new / 2
+                y_new = center_y_new - h_new / 2
 
-        # incolliamo l'immagine al centro (o in alto a sinistra, basta essere coerenti)
-        offset_x = (max_dim - w_crop) // 2
-        offset_y = (max_dim - h_crop) // 2
-        square_img.paste(cropped_img, (offset_x, offset_y))
-        
-        # resize alla dimensione di input della ResNet (224x224).
-        # Importante: ora che è quadrata, il resize non deforma l'oggetto!
-        square_img = square_img.resize((224, 224), Image.BILINEAR)
+                # 4. Clamping (Sicurezza bordi)
+                # Evitiamo coordinate negative o fuori dall'immagine 640x480
+                x_new = max(0, min(x_new, img_w - 1))
+                y_new = max(0, min(y_new, img_h - 1))
+                
+                # Se il box allargato esce a destra/sotto, lo tagliamo
+                # Calcoliamo lo spazio rimanente da x_new al bordo destro
+                available_w = img_w - x_new
+                available_h = img_h - y_new
+                
+                w_new = min(w_new, available_w)
+                h_new = min(h_new, available_h)
 
-        return self.transform_crop(square_img)
+                # Sovrascriviamo le coordinate originali solo se le nuove dimensioni hanno senso (>1px)
+                if w_new > 1 and h_new > 1:
+                    x, y, w, h = x_new, y_new, w_new, h_new
+            # --- FINE MODIFICA ---
+
+            # Convertiamo in interi per PIL e facciamo il crop
+            # Usiamo max(1, ...) per sicurezza estrema contro crash su crop vuoti
+            crop_rect = (
+                int(x), 
+                int(y), 
+                int(x) + max(1, int(w)), 
+                int(y) + max(1, int(h))
+            )
+            
+            cropped_img = img.crop(crop_rect)
+
+            # --- Codice Standard: Padding Quadrato + Resize ---
+            w_crop, h_crop = cropped_img.size
+            max_dim = max(w_crop, h_crop)
+
+            # Creiamo immagine quadrata nera
+            square_img = Image.new('RGB', (max_dim, max_dim), (0, 0, 0))
+
+            # Incolliamo al centro
+            offset_x = (max_dim - w_crop) // 2
+            offset_y = (max_dim - h_crop) // 2
+            square_img.paste(cropped_img, (offset_x, offset_y))
+            
+            # Resize finale a 224x224 (input ResNet)
+            # Importante: ora che è quadrata, il resize non deforma l'aspect ratio dell'oggetto
+            square_img = square_img.resize((224, 224), Image.BILINEAR)
+
+            return self.transform_crop(square_img)
 
     def load_6d_pose(self, folder_id: int = None, sample_id: int = None):
         """

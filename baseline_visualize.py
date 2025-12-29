@@ -203,7 +203,7 @@ def visualize_predictions(
     cam_k,
     image_path,
     yolo_checkpoint=str(Path("checkpoints") / "best.pt"),
-    pose_checkpoint=str(Path("checkpoints") / "best_pose_model_with_stats.pt"),
+    pose_checkpoint=str(Path("checkpoints") / "best_pose_model.pt"),
     device='cuda',
     figsize=(12, 8),
     img_mean=[0.485, 0.456, 0.406],
@@ -249,7 +249,7 @@ def visualize_predictions(
     # Support both forward slash and backslash (Windows compatibility)
     match = re.search(r'data[/\\](\d+)[/\\]rgb[/\\](\d+)\.png', image_path)
     if not match:
-        raise ValueError("Path immagine non valido")
+        raise ValueError(f"Path immagine non valido: {image_path}")
     
     obj_folder = match.group(1)
     img_name = match.group(2)

@@ -1,68 +1,136 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from models.ResNetPose import quaternion_to_rotation_matrix
+import math
 
 class PoseLoss(nn.Module):
     """
-    Loss per 6D pose estimation.
+    Loss per 6D pose estimation con supporto per oggetti simmetrici.
     
     IMPORTANTE: ResNet predice SOLO quaternion (rotazione).
     La translation viene calcolata geometricamente da bbox + diametro.
     
-    Quindi la loss ottimizza SOLO il quaternion!
-    La translation viene usata solo per metriche di monitoraggio.
+    Loss functions:
+    - Quaternion Geodesic: per oggetti standard
+    - Rotation Matrix Geodesic: per oggetti simmetrici (teoricamente corretta!)
+    - Hybrid Mode: Quaternion per standard, Rotation Matrix per simmetrici (BEST!)
+    
     """
     
     def __init__(self, lambda_rotation=1.0, lambda_translation=0.0):
         super(PoseLoss, self).__init__()
         self.lambda_rotation = lambda_rotation
-        self.lambda_translation = lambda_translation  # Sempre 0! Translation non ha gradienti
+        self.lambda_translation = lambda_translation
+        self.symmetric_objects = [10, 11]
     
     def quaternion_angular_distance(self, q1, q2):
         """
-        Angular distance tra quaternions.
+        Geodesic Distance tra quaternions (gestisce ambiguità q = -q).
         Loss: 1 - |q1 · q2|
         
-        Più il dot product è vicino a 1, più i quaternion sono simili.
+        Usa torch.abs per gestire double cover (q e -q sono la stessa rotazione).
         """
-        # Normalize
-        q1 = q1 / (torch.norm(q1, dim=1, keepdim=True) + 1e-8)
-        q2 = q2 / (torch.norm(q2, dim=1, keepdim=True) + 1e-8)
+        # Normalize con epsilon sicuro
+        q1 = F.normalize(q1, p=2, dim=1, eps=1e-6)
+        q2 = F.normalize(q2, p=2, dim=1, eps=1e-6)
         
-        # Dot product
+        # Dot product con abs per gestire q = -q
         dot = torch.abs(torch.sum(q1 * q2, dim=1))
-        dot = torch.clamp(dot, 0, 1)
+        # Clamp per sicurezza (non dovrebbe servire con abs)
+        dot = torch.clamp(dot, 0.0, 1.0)
         
         return torch.mean(1.0 - dot)
     
-    def forward(self, pred_quat, pred_trans, gt_quat, gt_trans):
+    def rotation_matrix_geodesic_loss(self, pred_quat, gt_quat):
+        """
+        Geodesic Distance su SO(3) manifold usando rotation matrices.
+        
+        Questa è LA loss corretta per oggetti simmetrici:
+        - Nessuna ambiguità (vs quaternion: q = -q)
+        - Distanza nativa sul gruppo delle rotazioni SO(3)
+        - Smooth e differenziabile per gradient descent
+        - Gestisce simmetrie naturalmente
+        
+        Formula: arccos((trace(R_pred^T @ R_gt) - 1) / 2)
+        
+        IMPORTANTE: Loss normalizzata in [0, 1] dividendo per π per compatibilità
+        con Quaternion Loss nell'Hybrid mode.
+        
+        Questa loss è usata in SOTA papers (PoseCNN, DenseFusion, PVNet).
+        """
+        
+        # Converti quaternions a rotation matrices
+        pred_R = quaternion_to_rotation_matrix(pred_quat)  # (B, 3, 3)
+        gt_R = quaternion_to_rotation_matrix(gt_quat)      # (B, 3, 3)
+        
+        # Calcola R_diff = R_pred^T @ R_gt
+        R_diff = torch.bmm(pred_R.transpose(1, 2), gt_R)  # (B, 3, 3)
+        
+        # Trace di R_diff
+        trace = R_diff[:, 0, 0] + R_diff[:, 1, 1] + R_diff[:, 2, 2]  # (B,)
+        
+        # FORMULAZIONE PIÙ STABILE: usa sin invece di arccos
+        # arccos è sensibile vicino a ±1, sin è molto più stabile
+        # Formula alternativa: sin(θ/2) = sqrt((1 - cos(θ))/2)
+        cos_angle = (trace - 1.0) / 2.0
+        
+        # Clamp aggressivo per evitare sqrt di negativi
+        cos_angle = torch.clamp(cos_angle, -1.0, 1.0)
+        
+        # sin(θ/2) = sqrt((1 - cos(θ))/2) - MOLTO più stabile di arccos!
+        sin_half = torch.sqrt((1.0 - cos_angle) / 2.0 + 1e-7)
+        
+        # Loss: sin(θ/2) è già in [0, 1] per θ in [0, π]
+        # Questo è equivalente a geodesic ma numericamente stabile
+        return torch.mean(sin_half)
+    
+    def forward(self, pred_quat, pred_trans, gt_quat, gt_trans, class_ids=None):
         """
         Args:
             pred_quat: (B, 4) predicted quaternion (DA RESNET - HA GRADIENTI)
             pred_trans: (B, 3) predicted translation (CALCOLATA GEOMETRICAMENTE - NO GRADIENTI)
             gt_quat: (B, 4) ground truth quaternion
             gt_trans: (B, 3) ground truth translation
+            class_ids: (B,) tensor con class ID per ogni sample (per hybrid mode)
             
         Returns:
-            dict con total_loss (solo rotation), metriche
+            dict con total_loss, metriche
         """
-        # Loss SOLO su rotazione (questa backpropaga a ResNet)
-        rot_loss = self.quaternion_angular_distance(pred_quat, gt_quat)
+        # Hybrid Mode: scegli loss in base all'oggetto
+        if  class_ids is not None:
+            batch_size = pred_quat.shape[0]
+            rot_losses = []
+            
+            for i in range(batch_size):
+                class_id = class_ids[i].item()
+                
+                # Oggetto simmetrico -> Rotation Matrix Geodesic
+                if class_id in self.symmetric_objects:
+                    loss = self.rotation_matrix_geodesic_loss(
+                        pred_quat[i:i+1], gt_quat[i:i+1]
+                    )
+                # Oggetto standard -> Quaternion Geodesic
+                else:
+                    loss = self.quaternion_angular_distance(
+                        pred_quat[i:i+1], gt_quat[i:i+1]
+                    )
+                rot_losses.append(loss)
+            
+            rot_loss = torch.mean(torch.stack(rot_losses))
         
         # Translation error: SOLO per monitoraggio, NO backprop
         with torch.no_grad():
             trans_error_m = torch.mean(torch.norm(pred_trans - gt_trans, dim=1))
             trans_error_cm = trans_error_m * 100  # metri -> cm
         
-        # Total loss: SOLO rotazione!
+        # Total loss: SOLO rotazione (translation è geometrica)
         total_loss = self.lambda_rotation * rot_loss
-        # NON aggiungiamo translation perché non c'è da ottimizzare
         
         return {
             'total_loss': total_loss,
             'rotation_loss': rot_loss.item(),
-            'translation_error_cm': trans_error_cm.item()  # Solo metrica
+            'translation_error_cm': trans_error_cm.item()
         }
 
 

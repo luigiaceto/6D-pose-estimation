@@ -268,6 +268,9 @@ def evaluate(
     add_r_accuracy = np.mean(all_add_rot_only_np < threshold_10) * 100
     
     # add total avg last row
+    all_add_rotation_only_np = np.array(all_add_rotation_only)
+    accuracy_rotation_only = np.mean(all_add_rotation_only_np < threshold_10) * 100
+    
     per_class_results.append({
         'class_id': 'ALL',
         'num_samples': len(all_add),
@@ -301,7 +304,7 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
         'rot_mean': 'Rotation Error (deg)',
         'trans_mean': 'Translation Error (cm)',
         'add_mean': 'ADD / ADD-S (cm)',
-        'add_rot_only_mean': ' ADD (rot only) (cm)',
+        'add_rot_only_mean': 'ADD-R (cm)',
     })
 
     df = df[
@@ -309,6 +312,7 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
             'Object Name',
             '#Samples',
             'Accuracy @10% (%)',
+            'ADD-R Accuracy @10% (%)',
             'ADD-R Accuracy @10% (%)',
             'Rotation Error (deg)',
             'Translation Error (cm)',

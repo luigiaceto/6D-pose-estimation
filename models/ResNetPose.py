@@ -44,6 +44,30 @@ class ResNetPose(nn.Module):
         )
 
         self.quaternion_head = nn.Linear(256, 4)
+        
+        # Inizializzazione custom per stabilità numerica con FP16/AMP
+        self._init_weights()
+    
+    def _init_weights(self):
+        """Inizializzazione Xavier/Kaiming per layer custom."""
+        for m in [self.fc_layers_r, self.quaternion_head]:
+            for layer in m.modules():
+                if isinstance(layer, nn.Linear):
+                    # Xavier uniform per layer intermedi
+                    nn.init.xavier_uniform_(layer.weight, gain=1.0)
+                    if layer.bias is not None:
+                        nn.init.constant_(layer.bias, 0.0)
+                elif isinstance(layer, nn.BatchNorm1d):
+                    nn.init.constant_(layer.weight, 1.0)
+                    nn.init.constant_(layer.bias, 0.0)
+        
+        # Quaternion head: inizializzazione speciale per output normalizzato
+        # Usa gain piccolo per evitare grandi valori iniziali
+        nn.init.xavier_uniform_(self.quaternion_head.weight, gain=0.01)
+        # Bias iniziale: quaternion identità [1, 0, 0, 0]
+        nn.init.constant_(self.quaternion_head.bias, 0.0)
+        with torch.no_grad():
+            self.quaternion_head.bias[0] = 1.0  # w=1 (identità)
     
     def forward(self, x):
         """
@@ -64,8 +88,9 @@ class ResNetPose(nn.Module):
         # Proiezione finale a 4 valori
         quaternion = self.quaternion_head(x)
         
-        # Normalizzazione L2 dei quaternioni
-        return F.normalize(quaternion, p=2, dim=1)
+        # Normalizzazione L2 dei quaternioni con epsilon adattivo per FP16
+        eps = 1e-8 if quaternion.dtype == torch.float32 else 1e-6
+        return F.normalize(quaternion, p=2, dim=1, eps=eps)
     
     def freeze_backbone(self):
         """Freeze ResNet backbone."""
@@ -90,8 +115,9 @@ def quaternion_to_rotation_matrix(quaternion):
     """
     batch_size = quaternion.shape[0]
     
-    # Normalize
-    quaternion = quaternion / (torch.norm(quaternion, dim=1, keepdim=True) + 1e-8)
+    # Normalize con epsilon più grande per FP16/AMP stability
+    eps = 1e-8 if quaternion.dtype == torch.float32 else 1e-6
+    quaternion = quaternion / (torch.norm(quaternion, dim=1, keepdim=True) + eps)
     
     w, x, y, z = quaternion[:, 0], quaternion[:, 1], quaternion[:, 2], quaternion[:, 3]
     
