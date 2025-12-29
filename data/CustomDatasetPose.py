@@ -8,6 +8,7 @@ import torchvision.transforms as transforms
 
 IMG_WIDTH = 640
 IMG_HEIGHT = 480
+SYMMETRIC_OBJECTS = [10, 11]
 
 class CustomDatasetPose(Dataset):
     def __init__(self, dataset_root, split='train', train_ratio=0.8, seed=42, cam_K=None):

@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import yaml
 import os
+import re
 from ultralytics import YOLO
 
 from models.ResNetPose import ResNetPose, quaternion_to_rotation_matrix
@@ -31,9 +32,9 @@ def draw_axis(img, R, t, K, scale=0.05):
     # Punti 3D degli assi
     points_3d = np.array([
         [0, 0, 0],
-        [scale, 0, 0],  # X rosso
-        [0, scale, 0],  # Y verde
-        [0, 0, scale]   # Z blu
+        [scale, 0, 0],  
+        [0, scale, 0],  
+        [0, 0, scale]
     ], dtype=np.float32)
     
     # Trasforma in camera coords
@@ -43,7 +44,7 @@ def draw_axis(img, R, t, K, scale=0.05):
     fx, fy, cx, cy = K[0], K[4], K[2], K[5]
     points_2d = []
     for p in points_cam:
-        if p[2] > 0:  # Solo se davanti alla camera
+        if p[2] > 0: 
             u = int(fx * p[0] / p[2] + cx)
             v = int(fy * p[1] / p[2] + cy)
             points_2d.append((u, v))
@@ -52,74 +53,9 @@ def draw_axis(img, R, t, K, scale=0.05):
     
     if all(p is not None for p in points_2d):
         origin = points_2d[0]
-        cv2.line(img, origin, points_2d[1], (0, 0, 255), 3)    # X rosso
-        cv2.line(img, origin, points_2d[2], (0, 255, 0), 3)    # Y verde
-        cv2.line(img, origin, points_2d[3], (255, 0, 0), 3)    # Z blu
-    
-    return img
-
-
-def draw_3d_bbox(img, R, t, K, obj_id, models_info):
-    """
-    Disegna bounding box 3D dell'oggetto sull'immagine.
-    
-    Args:
-        img: immagine BGR
-        R: (3,3) rotation matrix
-        t: (3,) translation vector
-        K: (3,3) camera intrinsics
-        obj_id: ID oggetto
-        models_info: dizionario con info modelli
-    """
-    # Carica corner points 3D del modello
-    info = models_info[obj_id]
-    min_x, min_y, min_z = info['min_x'], info['min_y'], info['min_z']
-    size_x, size_y, size_z = info['size_x'], info['size_y'], info['size_z']
-    
-    # 8 corners del bounding box 3D (in mm)
-    corners_3d = np.array([
-        [min_x, min_y, min_z],
-        [min_x + size_x, min_y, min_z],
-        [min_x + size_x, min_y + size_y, min_z],
-        [min_x, min_y + size_y, min_z],
-        [min_x, min_y, min_z + size_z],
-        [min_x + size_x, min_y, min_z + size_z],
-        [min_x + size_x, min_y + size_y, min_z + size_z],
-        [min_x, min_y + size_y, min_z + size_z]
-    ], dtype=np.float32)
-    
-    # Trasforma in camera coords: (R @ p + t) per ogni punto
-    corners_cam = (R @ corners_3d.T).T + t * 1000  # t è in metri, convertiamo in mm
-    
-    # Proietta a 2D
-    fx, fy, cx, cy = K[0], K[4], K[2], K[5]
-    corners_2d = []
-    for p in corners_cam:
-        if p[2] > 0:  # Solo se davanti alla camera
-            u = int(fx * p[0] / p[2] + cx)
-            v = int(fy * p[1] / p[2] + cy)
-            corners_2d.append((u, v))
-        else:
-            return img  # Se qualche corner è dietro la camera, non disegnare
-    
-    # Disegna il bounding box 3D
-    # Bottom face (0,1,2,3)
-    cv2.line(img, corners_2d[0], corners_2d[1], (255, 255, 0), 2)
-    cv2.line(img, corners_2d[1], corners_2d[2], (255, 255, 0), 2)
-    cv2.line(img, corners_2d[2], corners_2d[3], (255, 255, 0), 2)
-    cv2.line(img, corners_2d[3], corners_2d[0], (255, 255, 0), 2)
-    
-    # Top face (4,5,6,7)
-    cv2.line(img, corners_2d[4], corners_2d[5], (255, 255, 0), 2)
-    cv2.line(img, corners_2d[5], corners_2d[6], (255, 255, 0), 2)
-    cv2.line(img, corners_2d[6], corners_2d[7], (255, 255, 0), 2)
-    cv2.line(img, corners_2d[7], corners_2d[4], (255, 255, 0), 2)
-    
-    # Vertical edges
-    cv2.line(img, corners_2d[0], corners_2d[4], (255, 255, 0), 2)
-    cv2.line(img, corners_2d[1], corners_2d[5], (255, 255, 0), 2)
-    cv2.line(img, corners_2d[2], corners_2d[6], (255, 255, 0), 2)
-    cv2.line(img, corners_2d[3], corners_2d[7], (255, 255, 0), 2)
+        cv2.line(img, origin, points_2d[1], (0, 0, 255), 3)    
+        cv2.line(img, origin, points_2d[2], (0, 255, 0), 3)    
+        cv2.line(img, origin, points_2d[3], (255, 0, 0), 3)
     
     return img
 
@@ -155,9 +91,9 @@ def draw_3d_bbox_colored(img, R, t, K, obj_id, models_info, color=(255, 255, 0))
     
     # Draw con colore specificato
     edges = [
-        (0,1), (1,2), (2,3), (3,0),  # bottom
-        (4,5), (5,6), (6,7), (7,4),  # top
-        (0,4), (1,5), (2,6), (3,7)   # vertical
+        (0,1), (1,2), (2,3), (3,0),
+        (4,5), (5,6), (6,7), (7,4),
+        (0,4), (1,5), (2,6), (3,7)
     ]
     for e in edges:
         cv2.line(img, corners_2d[e[0]], corners_2d[e[1]], color, 2)
@@ -168,7 +104,7 @@ def draw_3d_bbox_colored(img, R, t, K, obj_id, models_info, color=(255, 255, 0))
 def draw_axis_colored(img, R, t, K, scale=0.05, colors=None):
     """Versione con colori personalizzabili per GT vs Pred."""
     if colors is None:
-        colors = [(0, 0, 255), (0, 255, 0), (255, 0, 0)]  # default: RGB
+        colors = [(0, 0, 255), (0, 255, 0), (255, 0, 0)] 
     
     points_3d = np.array([
         [0, 0, 0],
@@ -191,9 +127,9 @@ def draw_axis_colored(img, R, t, K, scale=0.05, colors=None):
     
     if all(p is not None for p in points_2d):
         origin = points_2d[0]
-        cv2.line(img, origin, points_2d[1], colors[0], 3)  # X
-        cv2.line(img, origin, points_2d[2], colors[1], 3)  # Y
-        cv2.line(img, origin, points_2d[3], colors[2], 3)  # Z
+        cv2.line(img, origin, points_2d[1], colors[0], 3)  
+        cv2.line(img, origin, points_2d[2], colors[1], 3)
+        cv2.line(img, origin, points_2d[3], colors[2], 3)
     
     return img
 
@@ -202,7 +138,7 @@ def visualize_predictions(
     dataset_root,
     cam_k,
     image_path,
-    yolo_checkpoint=str(Path("checkpoints") / "best.pt"),
+    yolo_checkpoint=str(Path("checkpoints") / "best_yolo_model.pt"),
     pose_checkpoint=str(Path("checkpoints") / "best_pose_model.pt"),
     device='cuda',
     figsize=(12, 8),
@@ -244,9 +180,6 @@ def visualize_predictions(
     if img is None:
         raise FileNotFoundError(f"Immagine non trovata: {image_path}")
 
-    # Load ground truth per confronto
-    import re
-    # Support both forward slash and backslash (Windows compatibility)
     match = re.search(r'data[/\\](\d+)[/\\]rgb[/\\](\d+)\.png', image_path)
     if not match:
         raise ValueError(f"Path immagine non valido: {image_path}")
@@ -296,9 +229,7 @@ def visualize_predictions(
             cropped_rgb = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB)
             cropped_pil = Image.fromarray(cropped_rgb)
 
-            # =================================================================
             # LETTERBOX PADDING
-            # =================================================================
             w_crop, h_crop = cropped_pil.size
             max_dim = max(w_crop, h_crop)
 
@@ -312,8 +243,7 @@ def visualize_predictions(
             # Incolliamo l'immagine al centro
             square_img.paste(cropped_pil, (offset_x, offset_y))
             
-            # Resize alla dimensione di input della ResNet (224x224)
-            # Questo è fondamentale perché la rete aspetta questa dimensione fissa
+            # Resize alla dimensione di input della ResNet (224x224) 
             final_input = square_img.resize((224, 224), Image.BILINEAR)
             
             cropped_tensor = transform(final_input).unsqueeze(0).to(device)
@@ -339,16 +269,16 @@ def visualize_predictions(
             # Estrazione ground truth per questa immagine
             img_idx = int(img_name)
             if img_idx in gt_data:
-                gt_info = gt_data[img_idx][0]  # Primo oggetto
+                gt_info = gt_data[img_idx][0]  
                 gt_rotation = np.array(gt_info['cam_R_m2c']).reshape(3, 3)
-                gt_translation = np.array(gt_info['cam_t_m2c']) / 1000.0  # mm -> m
+                gt_translation = np.array(gt_info['cam_t_m2c']) / 1000.0  
                 gt_quat = np.array(gt_info['quaternion'])
                 
-                # Draw GROUND TRUTH (verde)
+                # Draw GROUND TRUTH
                 img = draw_3d_bbox_colored(img, gt_rotation, gt_translation, cam_k, obj_id, models_info, color=(0, 255, 0))
                 img = draw_axis_colored(img, gt_rotation, gt_translation, cam_k, scale=0.05, colors=[(0, 200, 0), (0, 255, 0), (0, 180, 0)])
                 
-                # Draw PREDICTION (ciano/blu)
+                # Draw PREDICTION 
                 img = draw_3d_bbox_colored(img, pred_rotation, pred_translation, cam_k, obj_id, models_info, color=(255, 165, 0))
                 img = draw_axis_colored(img, pred_rotation, pred_translation, cam_k, scale=0.05, colors=[(255, 100, 0), (255, 165, 0), (200, 130, 0)])
                 
@@ -363,7 +293,7 @@ def visualize_predictions(
                 print(f"     Quaternion:  [{pred_quat[0]:7.4f}, {pred_quat[1]:7.4f}, {pred_quat[2]:7.4f}, {pred_quat[3]:7.4f}]")
                 
                 # Calcola IoU del bounding box
-                gt_bbox = gt_info['obj_bb']  # [x_min, y_min, width, height]
+                gt_bbox = gt_info['obj_bb'] 
                 gt_x1, gt_y1, gt_w, gt_h = gt_bbox
                 gt_x2, gt_y2 = gt_x1 + gt_w, gt_y1 + gt_h
                 
@@ -386,7 +316,7 @@ def visualize_predictions(
                 bbox_iou = intersection / union if union > 0 else 0
                 
                 # Calcola errori pose
-                trans_diff = (pred_translation - gt_translation) * 100  # m -> cm
+                trans_diff = (pred_translation - gt_translation) * 100 
                 trans_error = np.linalg.norm(trans_diff)
                 R_diff = pred_rotation.T @ gt_rotation
                 rot_error = np.degrees(np.arccos(np.clip((np.trace(R_diff) - 1) / 2, -1.0, 1.0)))

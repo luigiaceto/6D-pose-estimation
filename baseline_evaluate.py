@@ -20,8 +20,8 @@ import pandas as pd
 from models.ResNetPose import ResNetPose, quaternion_to_rotation_matrix
 from models.PinholeCamera import PinholeCamera
 from models.losses import compute_add_metric, compute_add_rotation_only, compute_add_s_metric, compute_add_s_rotation_only
+from data.CustomDatasetPose import SYMMETRIC_OBJECTS
 
-# --- COSTANTI GLOBALI DI MAPPING ---
 
 # 1. Nomi per visualizzazione umana
 LINEMOD_OBJECT_NAMES = {
@@ -32,21 +32,20 @@ LINEMOD_OBJECT_NAMES = {
 }
 
 # 2. Traduzione da YOLO (0,1,2...) a LINEMOD (1,2,4...)
-# Questa mappa è specifica per come è stato addestrato il tuo YOLO attuale
 YOLO_TO_LINEMOD_MAP = {
-    0: 1,   # "01" -> ape
-    1: 2,   # "02" -> benchvise
-    2: 4,   # "04" -> camera (SALTO ID 3)
-    3: 5,   # "05" -> can
-    4: 6,   # "06" -> cat
-    5: 8,   # "08" -> driller (SALTO ID 7)
-    6: 9,   # "09" -> duck
-    7: 10,  # "10" -> eggbox
-    8: 11,  # "11" -> glue
-    9: 12,  # "12" -> holepuncher
-    10: 13, # "13" -> iron
-    11: 14, # "14" -> lamp
-    12: 15  # "15" -> phone
+    0: 1,  
+    1: 2,  
+    2: 4,  
+    3: 5,  
+    4: 6,  
+    5: 8,  
+    6: 9,  
+    7: 10, 
+    8: 11, 
+    9: 12, 
+    10: 13,
+    11: 14,
+    12: 15 
 }
 
 def load_model_points(dataset_root, obj_id):
@@ -115,7 +114,7 @@ def evaluate(
     object_diameters = test_dataset.get_object_diameters()
     
     # Metriche
-    symmetric_objects = [10, 11]  # eggbox, glue
+    symmetric_objects = SYMMETRIC_OBJECTS
     all_add = []
     all_add_rotation_only = []
     all_add_s = []
@@ -221,19 +220,6 @@ def evaluate(
     threshold_10 = all_diameters_cm * 0.1
     accuracy = np.mean(all_add_np < threshold_10) * 100
 
-
-    # Interpretazione
-    if accuracy >= 80:
-        level = "EXCELLENT"
-    elif accuracy >= 60:
-        level = "GOOD"
-    elif accuracy >= 40:
-        level = "MODERATE"
-    else:
-        level = "POOR"
-    print(f"Performance Level: {level}\n")
-
-
     per_class_results=[]
     for class_id, metrics in per_class_metrics.items():
         if len(metrics) == 0:
@@ -266,10 +252,6 @@ def evaluate(
     # ADD-R accuracy @ 10% diameter (rotation only)
     all_add_rot_only_np = np.array(all_add_rotation_only)
     add_r_accuracy = np.mean(all_add_rot_only_np < threshold_10) * 100
-    
-    # add total avg last row
-    all_add_rotation_only_np = np.array(all_add_rotation_only)
-    accuracy_rotation_only = np.mean(all_add_rotation_only_np < threshold_10) * 100
     
     per_class_results.append({
         'class_id': 'ALL',
@@ -313,16 +295,14 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
             '#Samples',
             'Accuracy @10% (%)',
             'ADD-R Accuracy @10% (%)',
-            'ADD-R Accuracy @10% (%)',
             'Rotation Error (deg)',
             'Translation Error (cm)',
             'ADD / ADD-S (cm)',
-            'ADD (rot only) (cm)',
+            'ADD-R (cm)',
         ]
     ]
 
     df = df.round(2)
-    #df = df.sort_values(by='Object ID', ascending=True)
 
     if save_table:
         df.to_csv(table_path, index=False)

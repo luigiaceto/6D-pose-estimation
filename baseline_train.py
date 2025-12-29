@@ -9,9 +9,6 @@ from models.ResNetPose import ResNetPose
 from models.PinholeCamera import PinholeCamera
 from models.losses import PoseLoss
 
-# Import necessario per la conversione (se serve in futuro per ADD metric completa)
-from models.ResNetPose import quaternion_to_rotation_matrix 
-
 def train(
     train_dataset,
     train_loader,
@@ -45,29 +42,24 @@ def train(
     # Model Setup
     model = ResNetPose().to(device)
 
-    # --- AGGIUNTA PER GESTIRE IL FREEZE PRIMA DEL PARALLELO ---
-    # Gestiamo il freeze prima di wrappare il modello, così accediamo ai metodi diretti
     if freeze_epochs > 0:
         model.freeze_backbone()
         print(f"Backbone frozen per {freeze_epochs} epochs")
 
-    # --- ATTIVAZIONE TURBO: PARALLEL GPU ---
+    # PARALLEL GPU in caso siano disponibili più gpus (kaggle)
     if torch.cuda.device_count() > 1:
-        print(f"🚀 Turbo Mode: Using {torch.cuda.device_count()} GPUs!")
+        print(f"Turbo Mode: Using {torch.cuda.device_count()} GPUs!")
         model = torch.nn.DataParallel(model)
-    # ---------------------------------------
 
     # Loss
     criterion = PoseLoss(lambda_rotation=1.0, lambda_translation=0.0)
 
-    # Optimizer (Nota: DataParallel non cambia model.parameters(), quindi questo resta uguale)
-    # Dobbiamo però stare attenti ad accedere ai parametri corretti se frozen
     
     # Funzione helper per recuperare il modello "reale" (dentro o fuori DataParallel)
     def get_raw_model(m):
         return m.module if hasattr(m, 'module') else m
 
-    raw_model = get_raw_model(model) # Riferimento al modello base per accedere ai layer specifici
+    raw_model = get_raw_model(model) 
 
     if freeze_epochs > 0:
         optimizer = optim.AdamW([
@@ -104,14 +96,11 @@ def train(
     best_val_loss = float('inf')
     start_epoch = 0
     
-    # Resume from checkpoint
+    # Resume from checkpoint in caso si volesse rifar partire un training
     if resume_from_checkpoint is not None and os.path.exists(resume_from_checkpoint):
         print(f"Resuming from checkpoint: {resume_from_checkpoint}")
         checkpoint = torch.load(resume_from_checkpoint, map_location=device)
         
-        # Gestione caricamento pesi su DataParallel
-        # Se il checkpoint era single-gpu e ora siamo multi-gpu (o viceversa), le chiavi potrebbero non combaciare
-        # Soluzione semplice: carichiamo sempre sul raw_model
         get_raw_model(model).load_state_dict(checkpoint['model_state_dict'])
         
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
@@ -125,9 +114,8 @@ def train(
     for epoch in range(start_epoch, epochs):
         print(f"\nEpoch {epoch+1}/{epochs}")
         
-        # Unfreeze logic (Safe for DataParallel)
         if epoch == freeze_epochs and freeze_epochs > 0:
-            get_raw_model(model).unfreeze_backbone() # <--- FIX QUI
+            get_raw_model(model).unfreeze_backbone()
             print("Backbone unfrozen")
         
         # --- TRAINING PHASE ---
@@ -147,7 +135,7 @@ def train(
             optimizer.zero_grad(set_to_none=True)
             
             with torch.amp.autocast(device_type="cuda", enabled=USE_AMP):
-                # 1. Prediction (DataParallel divide questo batch sulle 2 GPU automaticamente!)
+                # 1. Prediction
                 pred_quaternion = model(cropped_img) 
                 
                 # 2. Geometria
@@ -197,7 +185,7 @@ def train(
                 bbox_base = batch['bbox_base'].to(device, non_blocking=True)
                 obj_id = batch['obj_id'].to(device, non_blocking=True).long()
                 
-                # Forward (Parallelizzato)
+                # Forward
                 pred_quaternion = model(cropped_img)
                 
                 # Calcoli geometrici

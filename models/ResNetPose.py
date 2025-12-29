@@ -115,7 +115,7 @@ def quaternion_to_rotation_matrix(quaternion):
     """
     batch_size = quaternion.shape[0]
     
-    # Normalize con epsilon più grande per FP16/AMP stability
+    # Per FP16/AMP stability
     eps = 1e-8 if quaternion.dtype == torch.float32 else 1e-6
     quaternion = quaternion / (torch.norm(quaternion, dim=1, keepdim=True) + eps)
     

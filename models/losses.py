@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from models.ResNetPose import quaternion_to_rotation_matrix
-import math
+from data.CustomDatasetPose import SYMMETRIC_OBJECTS
 
 class PoseLoss(nn.Module):
     """
@@ -22,7 +22,7 @@ class PoseLoss(nn.Module):
         super(PoseLoss, self).__init__()
         self.lambda_rotation = lambda_rotation
         self.lambda_translation = lambda_translation
-        self.symmetric_objects = [10, 11]
+        self.symmetric_objects = SYMMETRIC_OBJECTS
     
     def quaternion_angular_distance(self, q1, q2):
         """
@@ -70,19 +70,13 @@ class PoseLoss(nn.Module):
         # Trace di R_diff
         trace = R_diff[:, 0, 0] + R_diff[:, 1, 1] + R_diff[:, 2, 2]  # (B,)
         
-        # FORMULAZIONE PIÙ STABILE: usa sin invece di arccos
-        # arccos è sensibile vicino a ±1, sin è molto più stabile
-        # Formula alternativa: sin(θ/2) = sqrt((1 - cos(θ))/2)
         cos_angle = (trace - 1.0) / 2.0
         
         # Clamp aggressivo per evitare sqrt di negativi
         cos_angle = torch.clamp(cos_angle, -1.0, 1.0)
         
-        # sin(θ/2) = sqrt((1 - cos(θ))/2) - MOLTO più stabile di arccos!
         sin_half = torch.sqrt((1.0 - cos_angle) / 2.0 + 1e-7)
         
-        # Loss: sin(θ/2) è già in [0, 1] per θ in [0, π]
-        # Questo è equivalente a geodesic ma numericamente stabile
         return torch.mean(sin_half)
     
     def forward(self, pred_quat, pred_trans, gt_quat, gt_trans, class_ids=None):

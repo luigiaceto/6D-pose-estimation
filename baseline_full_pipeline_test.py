@@ -5,9 +5,9 @@ from pathlib import Path
 from ultralytics import YOLO
 from collections import defaultdict
 
-# Imports dai tuoi moduli
 from models.ResNetPose import ResNetPose, quaternion_to_rotation_matrix
 from models.PinholeCamera import PinholeCamera
+from data.CustomDatasetPose import SYMMETRIC_OBJECTS
 
 # Importiamo le metriche e la MAPPA dal file centrale
 from baseline_evaluate import (
@@ -19,16 +19,15 @@ from baseline_evaluate import (
     compute_add_s_rotation_only,
     load_model_points, 
     print_evaluation_results_table,
-    YOLO_TO_LINEMOD_MAP  # <--- IMPORTIAMO LA MAPPA CENTRALIZZATA
+    YOLO_TO_LINEMOD_MAP
 )
 
 def evaluate_full_pipeline(
     test_dataset,
     test_loader,
-    yolo_model_path,
-    pose_model_path,
     cam_k,
-    symmetric_objects=None,
+    yolo_checkpoint=str(Path("checkpoints") / "best_yolo_model.pt"),
+    pose_checkpoint=str(Path("checkpoints") / "best_pose_model.pt"),
     device="cuda"
 ):
     """
@@ -40,17 +39,16 @@ def evaluate_full_pipeline(
     """
     
     # 1. Setup Modelli
-    yolo = YOLO(yolo_model_path)
+    yolo = YOLO(yolo_checkpoint)
     
     pose_model = ResNetPose().to(device)
-    checkpoint = torch.load(pose_model_path, map_location=device, weights_only=False)
+    checkpoint = torch.load(pose_checkpoint, map_location=device, weights_only=False)
     pose_model.load_state_dict(checkpoint["model_state_dict"])
     pose_model.eval()
 
     pinhole = PinholeCamera(cam_k)
     
-    if symmetric_objects is None:
-        symmetric_objects = [10, 11] 
+    symmetric_objects = SYMMETRIC_OBJECTS 
         
     object_diameters = test_dataset.get_object_diameters()
     
@@ -63,9 +61,9 @@ def evaluate_full_pipeline(
     # Statistiche
     stats = {
         'processed_total': 0,
-        'valid_prediction': 0,      # YOLO ha azzeccato tutto (Box + Classe)
-        'discarded_miss': 0,        # YOLO non ha trovato nulla
-        'discarded_wrong_class': 0  # YOLO ha trovato box ma sbagliato classe
+        'valid_prediction': 0,      
+        'discarded_miss': 0,        
+        'discarded_wrong_class': 0  
     }
 
     # Loop
@@ -83,9 +81,7 @@ def evaluate_full_pipeline(
         sample_str = f"{int(raw_sample_info[1].item()):04d}"
         img_path = test_dataset.dataset_root / "data" / folder_str / "rgb" / f"{sample_str}.png"
         
-        # ---------------------------------------------------------
         # STEP 1: YOLO DETECTION
-        # ---------------------------------------------------------
         results = yolo(str(img_path), verbose=False)[0]
         
         if len(results.boxes) == 0:
@@ -99,29 +95,26 @@ def evaluate_full_pipeline(
         pred_raw_id = int(results.boxes.cls[best_idx].item())
         pred_linemod_id = YOLO_TO_LINEMOD_MAP.get(pred_raw_id, -1)
         
-        # --- CHECK SEVERO (STRICT) ---
+        # CHECK 
         if pred_linemod_id != gt_obj_id:
-            # Se la classe è sbagliata, SCARTIAMO!
+            # Se la classe è sbagliata, scartiamo
             stats['discarded_wrong_class'] += 1
             continue 
         
-        # Se siamo qui, YOLO ha indovinato la classe!
+        # Se siamo qui, YOLO ha indovinato la classe
         stats['valid_prediction'] += 1
 
         # Estrazione Box
         box = results.boxes.xywh[best_idx].cpu().numpy()
         x_c, y_c, w, h = box
         
-        # Prepariamo coordinate per il dataset (Top-Left)
+        # Prepariamo coordinate per il dataset
         x_tl = x_c - (w / 2)
         y_tl = y_c - (h / 2)
         bbox_for_dataset = [x_tl, y_tl, w, h]
         
-        # ---------------------------------------------------------
         # STEP 2: CROP & PREPROCESSING (via Dataset)
-        # ---------------------------------------------------------
         try:
-            # Usiamo il metodo del dataset per garantire coerenza col training
             crop_tensor = test_dataset.load_cropped_image(str(img_path), bbox_for_dataset)
             crop_tensor = crop_tensor.unsqueeze(0).to(device)
         except:
@@ -129,16 +122,12 @@ def evaluate_full_pipeline(
             stats['discarded_miss'] += 1
             continue
 
-        # ---------------------------------------------------------
-        # STEP 3: POSE ESTIMATION (RESNET)
-        # ---------------------------------------------------------
+        # STEP 3: POSE ESTIMATION
         with torch.no_grad():
             pred_q = pose_model(crop_tensor)
             pred_R = quaternion_to_rotation_matrix(pred_q)[0].cpu().numpy()
 
-        # ---------------------------------------------------------
         # STEP 4: GEOMETRY (PINHOLE)
-        # ---------------------------------------------------------
         diameter = object_diameters[gt_obj_id]
         
         # Pinhole vuole xyxy
@@ -151,9 +140,7 @@ def evaluate_full_pipeline(
         center_2d = torch.tensor([[x_c, y_c]], device=device)
         pred_t = pinhole.unproject_2d_to_3d(center_2d, depth)[0].cpu().numpy()
 
-        # ---------------------------------------------------------
         # STEP 5: METRICS
-        # ---------------------------------------------------------
         model_points = load_model_points(test_dataset.dataset_root, gt_obj_id)
         
         r_err = compute_rotation_error(pred_R, gt_R)
@@ -176,9 +163,7 @@ def evaluate_full_pipeline(
         all_metrics['rot_err'].append(r_err)
         all_metrics['trans_err'].append(t_err)
 
-    # ---------------------------------------------------------
     # REPORTING
-    # ---------------------------------------------------------
     print(f"\n{'='*80}")
     print(f"FULL PIPELINE DIAGNOSTICS:")
     print(f"Total Samples: {stats['processed_total']}")
@@ -187,7 +172,6 @@ def evaluate_full_pipeline(
     print(f"❌ Discarded (No Detection):       {stats['discarded_miss']}")
     print(f"{'='*80}\n")
     
-    # Preparazione DataFrame per stampa
     if len(all_metrics['add']) == 0:
         print("⚠️ Nessun campione valido trovato!")
         return None
