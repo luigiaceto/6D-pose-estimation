@@ -138,6 +138,14 @@ def train(
         T_max=epochs, 
         eta_min=1e-6
     )
+    # oppure
+    #scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+    #    optimizer, 
+    #    mode='min', 
+    #    factor=0.5, 
+    #    patience=5, 
+    #    min_lr=1e-7
+    #)
 
     # Freeze iniziale RGB se vuoi (Transfer Learning)
     model.freeze_rgb()
@@ -154,10 +162,6 @@ def train(
         print(f"LR Heads (Fusion): {lr_head:.8f}")
 
         if epoch == freeze_epochs:
-            # ATTENZIONE: nel caso si utilizzi unfreezing forse converrebbe
-            # ridurre tipo di un fattore 10 il learning rate ??? Bisogna comunque
-            # tenere conto che c'è anche la backbone CNN che va trainata from scratch
-            # non come la ResNet che parte pre-addestrata
             model.unfreeze_rgb()
             print("Unfreezing RGB backbone...")
             
