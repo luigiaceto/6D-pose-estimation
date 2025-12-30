@@ -303,7 +303,15 @@ class CustomDatasetPose(Dataset):
         height = max(0, height)
         # store coordinates of the center and width and height of the bounding box normalized to the
         # image width=640 pixels and height=480 pixels
-        bbox_YOLO = np.array([x_center/IMG_WIDTH, y_center/IMG_HEIGHT, width/IMG_WIDTH, height/IMG_HEIGHT], dtype=np.float32)
+        bbox_YOLO = np.array(
+            [
+                x_center/IMG_WIDTH,
+                y_center/IMG_HEIGHT,
+                width/IMG_WIDTH,
+                height/IMG_HEIGHT
+            ],
+            dtype=np.float32
+        )
 
         return cropped_img, translation, rotation, quaternion, bbox_base, obj_id, bbox_YOLO
 

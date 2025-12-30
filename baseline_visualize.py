@@ -322,12 +322,12 @@ def visualize_predictions(
                 rot_error = np.degrees(np.arccos(np.clip((np.trace(R_diff) - 1) / 2, -1.0, 1.0)))
                 
                 print(f"\n ERRORS:")
-                print(f"     BBox IoU (2D):        {bbox_iou:.2%}  ← YOLO detection accuracy")
-                print(f"     Translation Error:    {trans_error:.2f} cm")
+                print(f"     BBox IoU (2D) by YOLO: {bbox_iou:.2%}")
+                print(f"     Translation Error: {trans_error:.2f} cm")
                 print(f"       - X error: {trans_diff[0]:6.2f} cm")
                 print(f"       - Y error: {trans_diff[1]:6.2f} cm")
-                print(f"       - Z error (depth): {trans_diff[2]:6.2f} cm  ← Main issue!")
-                print(f"     Rotation Error:       {rot_error:.2f}°")
+                print(f"       - Z error (depth): {trans_diff[2]:6.2f} cm")
+                print(f"     Rotation Error: {rot_error:.2f}°")
     
     print("\n" + "="*70 + "\n")
 

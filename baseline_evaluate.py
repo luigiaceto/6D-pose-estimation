@@ -8,7 +8,6 @@ Calcola metriche:
 - Translation error (cm)
 """
 
-import os
 from pathlib import Path
 import torch
 import numpy as np
@@ -25,9 +24,19 @@ from data.CustomDatasetPose import SYMMETRIC_OBJECTS
 
 # 1. Nomi per visualizzazione umana
 LINEMOD_OBJECT_NAMES = {
-    1: "ape", 2: "benchvise", 4: "camera", 5: "can", 6: "cat",
-    8: "driller", 9: "duck", 10: "eggbox", 11: "glue",
-    12: "holepuncher", 13: "iron", 14: "lamp", 15: "phone",
+    1: "ape",
+    2: "benchvise",
+    4: "camera",
+    5: "can",
+    6: "cat",
+    8: "driller",
+    9: "duck",
+    10: "eggbox",
+    11: "glue",
+    12: "holepuncher",
+    13: "iron",
+    14: "lamp",
+    15: "phone",
     "ALL": "ALL"
 }
 
@@ -120,8 +129,8 @@ def evaluate(
     all_add_s = []
     all_rot_errors = []
     all_trans_errors = []
-    all_object_ids = []  # Per breakdown per oggetto
-    all_diameters = []   # Per calcolare accuracy @ 10%
+    all_object_ids = []         # Per breakdown per oggetto
+    all_diameters = []          # Per calcolare accuracy @ 10%
     
 
     # collect metrics per classe
@@ -184,9 +193,7 @@ def evaluate(
                 all_object_ids.append(obj_id)
                 all_diameters.append(object_diameters[obj_id])
                 
-                
                 # ADD o ADD-S
-                
                 if obj_id in symmetric_objects:
                     add_s = compute_add_s_metric(
                         pred_R[i], pred_t[i], gt_R[i], gt_t[i], model_points

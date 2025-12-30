@@ -219,4 +219,6 @@ def evaluate_full_pipeline(
     return print_evaluation_results_table(per_class_results)
 
 def list_to_df(metrics_list):
-    return {k: [m[k] for m in metrics_list] for k in metrics_list[0].keys()}
+    return {
+        k: [m[k] for m in metrics_list] for k in metrics_list[0].keys()
+    }

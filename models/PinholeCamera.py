@@ -8,18 +8,17 @@ class PinholeCamera:
     
     Il modello pinhole proietta un punto 3D espresso con le coordinate
     della camera (X, Y, Z) a coordinate 2D dell'immagine (u, v) usando:
+
         u = fx * X/Z + cx
         v = fy * Y/Z + cy
     
     E inversamente, dato (u, v, Z) possiamo calcolare (X, Y, Z):
+
         X = (u - cx) * Z / fx
         Y = (v - cy) * Z / fy
     """
     
     def __init__(self, cam_k):
-        """
-        
-        """
         self.fx, self.fy, self.cx, self.cy = cam_k[0], cam_k[4], cam_k[2], cam_k[5]
         
         # Camera intrinsics matrix K
