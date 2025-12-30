@@ -65,7 +65,9 @@ def evaluate(
     Evaluation del modello RGB-D Fusion.
     """
     
-    model = FusionPoseNet(cam_k=cam_k).to(device)
+    model = FusionPoseNet(
+        cam_k=cam_k
+    ).to(device)
     
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint['model_state_dict'])
@@ -99,7 +101,7 @@ def evaluate(
             
             # --- FORWARD PASS ---
             # Il modello ora restituisce direttamente la traslazione finale!
-            pred_quat, pred_translation = model(rgb, depth, bbox_center)
+            pred_quat, pred_translation, _ = model(rgb, depth, bbox_center)
             
             # Conversione quaternioni -> matrice rotazione
             pred_rotation = quaternion_to_rotation_matrix(pred_quat)
