@@ -82,8 +82,8 @@ class PoseLoss(nn.Module):
     def forward(self, pred_quat, pred_trans, gt_quat, gt_trans, class_ids=None):
         """
         Args:
-            pred_quat: (B, 4) predicted quaternion (DA RESNET - HA GRADIENTI)
-            pred_trans: (B, 3) predicted translation (CALCOLATA GEOMETRICAMENTE - NO GRADIENTI)
+            pred_quat: (B, 4) predicted quaternion
+            pred_trans: (B, 3) predicted translation
             gt_quat: (B, 4) ground truth quaternion
             gt_trans: (B, 3) ground truth translation
             class_ids: (B,) tensor con class ID per ogni sample (per hybrid mode)

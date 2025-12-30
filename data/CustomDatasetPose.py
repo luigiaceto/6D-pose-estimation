@@ -268,7 +268,7 @@ class CustomDatasetPose(Dataset):
         """
         pose = self.ground_truths[folder_id][sample_id]
         
-        translation = np.array(pose['cam_t_m2c'], dtype=np.float32)/1000.0  # [3] ---> (x,y,z) in meters
+        translation = np.array(pose['cam_t_m2c'], dtype=np.float32)/1000.0  # [3] ---> (x,y,z) IN METRI
         rotation = np.array(pose['cam_R_m2c'], dtype=np.float32).reshape(3, 3)  # [3x3] ---> rotation matrix
         quaternion = np.array(pose['quaternion'], dtype=np.float32)  # [4] ---> quaternion
         bbox_base = np.array(pose['obj_bb'], dtype=np.float32) # [4] ---> x_min, y_min, width, height
@@ -328,7 +328,7 @@ class CustomDatasetPose(Dataset):
         return {
             # sample
             "sample_id": torch.tensor(self.samples[idx]),
-            "cropped_img": cropped_img, # input della ResNet50 della baseline
+            "cropped_img": cropped_img, # input della ResNet50
             "rgb": img,
 
             # label/ground truth
