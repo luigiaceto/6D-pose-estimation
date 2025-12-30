@@ -197,7 +197,14 @@ def evaluate(
                         pred_R[i], gt_R[i], model_points
                     )
                     all_add_rotation_only.append(add_s_rotation_only * 100)
-                    per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add_s * 100, 'add_rotation_only': add_s_rotation_only * 100 })
+                    per_class_metrics[obj_id].append(
+                        {
+                            'rotation': rot_err,
+                            'translation': trans_err,
+                            'add': add_s * 100,
+                            'add_rotation_only': add_s_rotation_only * 100 
+                        }
+                    )
                 else:
                     add = compute_add_metric(
                         pred_R[i], pred_t[i], gt_R[i], gt_t[i], model_points
@@ -207,7 +214,14 @@ def evaluate(
                         pred_R[i], gt_R[i], model_points
                     )
                     all_add_rotation_only.append(add_rotation_only * 100)
-                    per_class_metrics[obj_id].append({ 'rotation': rot_err, 'translation': trans_err, 'add': add * 100, 'add_rotation_only': add_rotation_only * 100 })
+                    per_class_metrics[obj_id].append(
+                        { 
+                            'rotation': rot_err,
+                            'translation': trans_err,
+                            'add': add * 100,
+                            'add_rotation_only': add_rotation_only * 100
+                        }
+                    )
     
     all_add_np = np.array(all_add)
     all_diameters_np = np.array(all_diameters)
@@ -238,31 +252,35 @@ def evaluate(
         # ADD-R accuracy @ 10% diameter (rotation only)
         class_add_r_accuracy = np.mean(class_add_rotation_only_errors < class_threshold) * 100
         
-        per_class_results.append({
-            'class_id': class_id,
-            'num_samples': len(metrics),
-            'accuracy_10p': class_accuracy,
-            'add_r_accuracy_10p': class_add_r_accuracy,
-            'rot_mean': class_rot_errors.mean(),
-            'trans_mean': class_trans_errors.mean(),
-            'add_mean': class_add_errors.mean(),
-            'add_rot_only_mean': class_add_rotation_only_errors.mean()
-        })
+        per_class_results.append(
+            {
+                'class_id': class_id,
+                'num_samples': len(metrics),
+                'accuracy_10p': class_accuracy,
+                'add_r_accuracy_10p': class_add_r_accuracy,
+                'rot_mean': class_rot_errors.mean(),
+                'trans_mean': class_trans_errors.mean(),
+                'add_mean': class_add_errors.mean(),
+                'add_rot_only_mean': class_add_rotation_only_errors.mean()
+            }
+        )
     
     # ADD-R accuracy @ 10% diameter (rotation only)
     all_add_rot_only_np = np.array(all_add_rotation_only)
     add_r_accuracy = np.mean(all_add_rot_only_np < threshold_10) * 100
     
-    per_class_results.append({
-        'class_id': 'ALL',
-        'num_samples': len(all_add),
-        'accuracy_10p': accuracy,
-        'add_r_accuracy_10p': add_r_accuracy,
-        'rot_mean': np.mean(all_rot_errors),
-        'trans_mean': np.mean(all_trans_errors),
-        'add_mean': np.mean(all_add),
-        'add_rot_only_mean': np.mean(all_add_rotation_only),
-    })
+    per_class_results.append(
+        {
+            'class_id': 'ALL',
+            'num_samples': len(all_add),
+            'accuracy_10p': accuracy,
+            'add_r_accuracy_10p': add_r_accuracy,
+            'rot_mean': np.mean(all_rot_errors),
+            'trans_mean': np.mean(all_trans_errors),
+            'add_mean': np.mean(all_add),
+            'add_rot_only_mean': np.mean(all_add_rotation_only)
+        }
+    )
 
     return print_evaluation_results_table(per_class_results, save_table, table_path)   
 
@@ -278,16 +296,18 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
     
     df['Object Name'] = df['class_id'].map(LINEMOD_OBJECT_NAMES)
     df = df.drop(columns=['class_id'])
-    df = df.rename(columns={
-        'object_name': 'Object Name',
-        'num_samples': '#Samples',
-        'accuracy_10p': 'Accuracy @10% (%)',
-        'add_r_accuracy_10p': 'ADD-R Accuracy @10% (%)',
-        'rot_mean': 'Rotation Error (deg)',
-        'trans_mean': 'Translation Error (cm)',
-        'add_mean': 'ADD / ADD-S (cm)',
-        'add_rot_only_mean': 'ADD-R (cm)',
-    })
+    df = df.rename(
+        columns={
+            'object_name': 'Object Name',
+            'num_samples': '#Samples',
+            'accuracy_10p': 'Accuracy @10% (%)',
+            'add_r_accuracy_10p': 'ADD-R Accuracy @10% (%)',
+            'rot_mean': 'Rotation Error (deg)',
+            'trans_mean': 'Translation Error (cm)',
+            'add_mean': 'ADD / ADD-S (cm)',
+            'add_rot_only_mean': 'ADD-R (cm)'
+        }
+    )
 
     df = df[
         [
@@ -298,7 +318,7 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
             'Rotation Error (deg)',
             'Translation Error (cm)',
             'ADD / ADD-S (cm)',
-            'ADD-R (cm)',
+            'ADD-R (cm)'
         ]
     ]
 

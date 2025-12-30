@@ -5,3 +5,5 @@ domande.md
 datasets/
 runs/
 checkpoints/best_pose_model.pt
+checkpoints/best_model_letterbox.pt
+appunti.md

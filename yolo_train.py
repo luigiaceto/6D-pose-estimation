@@ -37,11 +37,13 @@ def train_YOLO(
     
     # Train model
     results = model.train(
+        # dataset
         data=str(data_yaml),
         epochs=epochs,
         batch=batch_size,
         device=device,
         imgsz=img_size,
+
         # Data augmentation
         hsv_h=0.1,
         hsv_s=0.1,

@@ -92,9 +92,12 @@ def load_depth_patch(dataset_root: str = None, folder: str = None, imageId: str 
 
     # Create a rectangle patch
     rect = patches.Rectangle(
-        (bbox[0], bbox[1]),  # (x, y)
-        bbox[2],             # width
-        bbox[3],             # height
+        (
+            bbox[0],
+            bbox[1]
+        ),                  # (x, y)
+        bbox[2],            # width
+        bbox[3],            # height
         linewidth=2,
         edgecolor='red',
         facecolor='none'

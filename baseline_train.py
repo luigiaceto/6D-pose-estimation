@@ -118,7 +118,7 @@ def train(
             get_raw_model(model).unfreeze_backbone()
             print("Backbone unfrozen")
         
-        # --- TRAINING PHASE ---
+        # --- TRAIN ON AN EPOCH ---
         model.train()
         train_losses = []
         
@@ -135,7 +135,7 @@ def train(
             optimizer.zero_grad(set_to_none=True)
             
             with torch.amp.autocast(device_type="cuda", enabled=USE_AMP):
-                # 1. Prediction
+                # 1. Predizione rotazione
                 pred_quaternion = model(cropped_img) 
                 
                 # 2. Geometria
@@ -155,8 +155,10 @@ def train(
                 
                 # 3. Loss
                 losses = criterion(
-                    pred_quaternion, pred_translation,
-                    gt_quaternion, gt_translation,
+                    pred_quaternion,
+                    pred_translation,
+                    gt_quaternion,
+                    gt_translation,
                     class_ids=obj_id
                 )
                 loss = losses['total_loss']
@@ -172,7 +174,7 @@ def train(
         
         avg_train_loss = np.mean(train_losses)
         
-        # --- VALIDATION PHASE ---
+        # --- VALIDATION AFTER 1 EPOCH ---
         model.eval()
         val_losses = []
         val_rot_errors = []
@@ -203,8 +205,10 @@ def train(
                 
                 # Loss
                 losses = criterion(
-                    pred_quaternion, pred_translation,
-                    gt_quaternion, gt_translation,
+                    pred_quaternion,
+                    pred_translation,
+                    gt_quaternion,
+                    gt_translation,
                     class_ids=obj_id
                 )
                 val_losses.append(losses['total_loss'].item())

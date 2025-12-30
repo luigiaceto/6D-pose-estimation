@@ -69,7 +69,6 @@ class CustomDatasetPose(Dataset):
 
             # AUGMENTATION OTTIMIZZATA PER LINEMOD (Dataset Piccolo)
             self.transform_crop = transforms.Compose([
-                # PER IL RESIZE FORZATO (stretch)
                 transforms.ColorJitter(
                     brightness=0.3,
                     contrast=0.2,
@@ -89,7 +88,6 @@ class CustomDatasetPose(Dataset):
             ])
         else:
             # Validation/Test: Nessuna augmentation, solo resize e normalize
-            self.transform_img = transforms.ToTensor()
             self.transform_img = transforms.ToTensor()
 
             self.transform_crop = transforms.Compose([
@@ -194,7 +192,7 @@ class CustomDatasetPose(Dataset):
             
             x, y, w, h = bbox
 
-            # --- INIZIO MODIFICA: BBox Jittering ---
+            # --- BBox Jittering ---
             # Lo facciamo solo in training per Data Augmentation
             if self.split == 'train':
                 # 1. Random Scale (zoom in/out del +/- 10%)
@@ -234,7 +232,6 @@ class CustomDatasetPose(Dataset):
                 # Sovrascriviamo le coordinate originali solo se le nuove dimensioni hanno senso (>1px)
                 if w_new > 1 and h_new > 1:
                     x, y, w, h = x_new, y_new, w_new, h_new
-            # --- FINE MODIFICA ---
 
             # Convertiamo in interi per PIL e facciamo il crop
             # Usiamo max(1, ...) per sicurezza estrema contro crash su crop vuoti
@@ -247,14 +244,14 @@ class CustomDatasetPose(Dataset):
             
             cropped_img = img.crop(crop_rect)
 
-            # --- Codice Standard: Padding Quadrato + Resize ---
+            # --- Letterbox Padding: Padding Quadrato + Resize ---
             w_crop, h_crop = cropped_img.size
             max_dim = max(w_crop, h_crop)
 
             # Creiamo immagine quadrata nera
             square_img = Image.new('RGB', (max_dim, max_dim), (0, 0, 0))
 
-            # Incolliamo al centro
+            # Incolliamo il crop al centro
             offset_x = (max_dim - w_crop) // 2
             offset_y = (max_dim - h_crop) // 2
             square_img.paste(cropped_img, (offset_x, offset_y))
@@ -340,6 +337,6 @@ class CustomDatasetPose(Dataset):
             "rotation": torch.tensor(rotation),
             "quaternion": torch.tensor(quaternion),
             "bbox_base": torch.tensor(bbox_base),
-            "bbox_YOLO": torch.tensor(bbox_YOLO), # bounding box ground truth in formato yolo
+            "bbox_YOLO": torch.tensor(bbox_YOLO) # bounding box ground truth in formato yolo
         }
     

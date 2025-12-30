@@ -29,8 +29,10 @@ class ResNetPose(nn.Module):
         # Rimuoviamo l'ultimo layer ovvero la classification head
         self.backbone = nn.Sequential(*list(resnet.children())[:-1])
         
-        # Setup della testa 
+        # Setup della testa
+        #
         # Riduzione graduale: 2048 -> 1024 -> 256 -> 4
+        #
         # Include BatchNorm e Dropout leggero (0.1)
         self.fc_layers_r = nn.Sequential(
             nn.Linear(feature_dim, 1024),
@@ -61,8 +63,8 @@ class ResNetPose(nn.Module):
                     nn.init.constant_(layer.weight, 1.0)
                     nn.init.constant_(layer.bias, 0.0)
         
-        # Quaternion head: inizializzazione speciale per output normalizzato
-        # Usa gain piccolo per evitare grandi valori iniziali
+        # Quaternion head: inizializzazione speciale per output normalizzato.
+        # Usa gain piccolo per evitare grandi valori iniziali.
         nn.init.xavier_uniform_(self.quaternion_head.weight, gain=0.01)
         # Bias iniziale: quaternion identità [1, 0, 0, 0]
         nn.init.constant_(self.quaternion_head.bias, 0.0)
