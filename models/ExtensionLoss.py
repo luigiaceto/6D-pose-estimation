@@ -1,114 +1,93 @@
 import torch
 import torch.nn as nn
-
+from utils.pose_utils import compute_matrix_geodesic_loss, compute_quaternion_loss,  SYMMETRIC_OBJECTS
 
 class RGBDPoseLoss(nn.Module):
     """
-    Loss combinata per RGB-D Pose Estimation.
-    Gestisce sia la Rotazione (Quaternioni) che la Traslazione (XYZ).
-    NON eredita da PoseLoss per evitare conflitti sui gradienti.
+    Loss ottimizzata per RGB-D Pose Estimation (Extension).
+    
+    Caratteristiche:
+    1. Hybrid Rotation Loss: Quaternion Loss per asimmetrici, Matrix Geodesic per simmetrici.
+    2. Learnable Uncertainties: Pesi s_rot, s_trans, s_proj appresi automaticamente.
+    3. Pinhole Constraint: Loss sulla riproiezione 2D (u, v) per legare geometria e visione.
     """
     
-    def __init__(self, cam_k, lambda_rot=20.0, lambda_trans=1.0):
+    def __init__(self, cam_k):
         super(RGBDPoseLoss, self).__init__()
 
+        # Buffer per parametri camera
         self.register_buffer(
             'cam_k',
-            (
-                torch.tensor([cam_k[0], cam_k[4], cam_k[2], cam_k[5]]) # [fx, fy, cx, cy]
-            ).view(1, 4)
+            (torch.tensor([cam_k[0], cam_k[4], cam_k[2], cam_k[5]])).view(1, 4)
         )
-
-        self.lambda_rot = lambda_rot
-        self.lambda_trans = lambda_trans
         
-        # Loss L1 per la traslazione (forse meglio nn.SmoothL1Loss(beta=1.0) rispetto nn.L1Loss ???)
-        self.trans_loss_fn = nn.SmoothL1Loss(beta=1.0)
-        # Loss MSE per il centro (u, v) in pixel, dell'oggetto 3D proiettato in 2D
+        # Loss per traslazione e proiezione
+        self.trans_loss_fn = nn.SmoothL1Loss(beta=1.0) # Robusta agli outlier
         self.proj_loss_fn = nn.MSELoss()
 
-        # PARAMETRI LEARNABLE (s = log(sigma^2))
-        # Inizializziamo a -2.0 o 0.0.
-        # Un valore negativo iniziale dà un peso iniziale alto alle loss,
-        # costringendo la rete a imparare velocemente all'inizio.
+        # --- PARAMETRI LEARNABLE (Kendall's Multi-Task Loss) ---
+        # Inizializzati a valori negativi (es. -2.0) per dare peso iniziale alto
         self.s_rot = nn.Parameter(torch.tensor(-2.0), requires_grad=True)
         self.s_trans = nn.Parameter(torch.tensor(-2.0), requires_grad=True)
         self.s_proj = nn.Parameter(torch.tensor(-2.0), requires_grad=True)
 
-    # non risolve problemi per gli oggetti 'simmetrici', occorrerebbe usare la
-    # ADD ma diventa molto pesante il training ??? Occorre la loss geodesica ???
-    def compute_rot_loss(self, pred_q, gt_q):
-        """
-        Calcola la distanza angolare tra quaternioni.
-        Formula: 1 - |<q1, q2>|
-        """
-        # Normalizzazione di sicurezza (per evitare instabilità numeriche).
-        # Anche se la rete ha una normalizzazione finale, è meglio rifarla qui per sicurezza
-        pred_q = pred_q / (torch.norm(pred_q, dim=1, keepdim=True) + 1e-8)
-        gt_q = gt_q / (torch.norm(gt_q, dim=1, keepdim=True) + 1e-8)
-        
-        # Dot product.
-        # q e -q rappresentano la stessa rotazione, quindi prendiamo il valore assoluto
-        dot_product = torch.abs(torch.sum(pred_q * gt_q, dim=1))
-        
-        # Clamp per evitare problemi numerici
-        dot_product = torch.clamp(dot_product, 0.0, 1.0)
-        
-        # Loss: Vogliamo massimizzare il dot product (avvicinarlo a 1)
-        # Quindi minimizziamo 1 - dot
-        return torch.mean(1.0 - dot_product)
 
     def forward(self, pred_quat, pred_trans, gt_quat, gt_trans, pred_2d, class_ids=None):
         """
-        Calcola la loss totale.
-        TUTTI gli input devono essere su GPU e far parte del grafo computazionale.
+        Calcola la loss totale pesata.
         """
         
-        fx = self.cam_k[:, 0:1]
-        fy = self.cam_k[:, 1:2]
-        cx = self.cam_k[:, 2:3]
-        cy = self.cam_k[:, 3:4]
-        gt_x, gt_y, gt_z = gt_trans[:, 0], gt_trans[:, 1], gt_trans[:, 2]
-
-        gt_2d = torch.stack(
-            [
-                (gt_x * fx / gt_z) + cx,    # gt_u
-                (gt_y * fy / gt_z) + cy     # gt_v
-            ],
-            dim=1
-        ) # (B, 2) questo è il bersaglio per gli offset 
-
-        # --- Loss Rotazione ---
-        # Restituisce un Tensor con gradiente attivo
-        loss_r = self.compute_rot_loss(pred_quat, gt_quat)
+        # 1. Calcolo target 2D per la Projection Loss
+        fx, fy = self.cam_k[:, 0:1], self.cam_k[:, 1:2]
+        cx, cy = self.cam_k[:, 2:3], self.cam_k[:, 3:4]
+        gt_z = gt_trans[:, 2:3] # Z deve essere > 0
         
-        # --- Loss Traslazione 3D (metri) ---
-        # pred_trans viene dal Pinhole Layer differenziabile -> ha gradiente attivo
+        # Evitiamo divisioni per zero se GT ha errori (clamp a 1mm)
+        gt_z = torch.clamp(gt_z, min=0.001) 
+        
+        gt_u = (gt_trans[:, 0:1] * fx / gt_z) + cx
+        gt_v = (gt_trans[:, 1:2] * fy / gt_z) + cy
+        gt_2d = torch.cat([gt_u, gt_v], dim=1) # (B, 2)
+
+        # --- LOSS ROTAZIONE IBRIDA ---
+        if class_ids is not None:
+            rot_losses = []
+            for i in range(len(class_ids)):
+                cid = int(class_ids[i].item())
+                # Se simmetrico -> Matrix Loss
+                if cid in SYMMETRIC_OBJECTS:
+                    l = compute_matrix_geodesic_loss(pred_quat[i:i+1], gt_quat[i:i+1])
+                # Se asimmetrico -> Quaternion Loss
+                else:
+                    l = compute_quaternion_loss(pred_quat[i:i+1], gt_quat[i:i+1])
+                rot_losses.append(l)
+            loss_r = torch.mean(torch.stack(rot_losses))
+        else:
+            # Fallback (tutti asimmetrici)
+            loss_r = compute_quaternion_loss(pred_quat, gt_quat)
+        
+        # --- LOSS TRASLAZIONE & PROIEZIONE ---
         loss_t = self.trans_loss_fn(pred_trans, gt_trans)
-        
-        # --- Loss uv ---
         loss_p = self.proj_loss_fn(pred_2d, gt_2d)
 
-        # --- Loss Totale Pesata (Multi-Task Learning) ---
+        # --- LOSS TOTALE PESATA (Learnable) ---
+        # exp(-s) * Loss + s
         weighted_loss_r = torch.exp(-self.s_rot) * loss_r + self.s_rot
         weighted_loss_t = torch.exp(-self.s_trans) * loss_t + self.s_trans
         weighted_loss_p = torch.exp(-self.s_proj) * loss_p + self.s_proj
+        
         total_loss = weighted_loss_r + weighted_loss_t + weighted_loss_p
         
-        # --- Metriche per Logging ---
-        # Calcoliamo l'errore in cm solo per stamparlo a video
+        # --- LOGGING ---
         with torch.no_grad():
-            # Distanza euclidea media tra i vettori
             diff = pred_trans - gt_trans
-            dist_m = torch.norm(diff, p=2, dim=1).mean()
-            error_cm = dist_m * 100 # converto in cm
-            diff_px = pred_2d - gt_2d
-            error_px = torch.norm(diff_px, p=2, dim=1).mean()
+            error_cm = torch.norm(diff, p=2, dim=1).mean() * 100
+            error_px = torch.norm(pred_2d - gt_2d, p=2, dim=1).mean()
         
         return {
-            'total_loss': total_loss,           # Tensor (per .backward())
-            'rot_loss': loss_r.detach(),        # Float (per print/log)
-            'trans_loss': loss_t.detach(),      # Float (per print/log)
-            'trans_err_cm': error_cm.detach(),  # Float (per capire quanto sbaglia in cm),
+            'total_loss': total_loss,
+            'rot_loss': loss_r.detach(),
+            'trans_loss': loss_t.detach(),
+            'trans_err_cm': error_cm.detach(),
             'proj_err_px': error_px.detach()
         }

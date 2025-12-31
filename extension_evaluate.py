@@ -6,8 +6,8 @@ from tqdm import tqdm
 from collections import defaultdict
 
 from models.FusionPoseNet import FusionPoseNet
-from models.ResNetPose import quaternion_to_rotation_matrix
-from models.losses import (
+from utils.pose_utils import (
+    quaternion_to_rotation_matrix,
     compute_add_metric,
     compute_add_s_metric
 )

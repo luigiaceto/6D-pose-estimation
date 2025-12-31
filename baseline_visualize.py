@@ -12,129 +12,16 @@ import os
 import re
 from ultralytics import YOLO
 
-from models.ResNetPose import ResNetPose, quaternion_to_rotation_matrix
+from models.ResNetPose import ResNetPose
 from models.PinholeCamera import PinholeCamera
 import torchvision.transforms as transforms
 
 import matplotlib.pyplot as plt
 
-def draw_axis(img, R, t, K, scale=0.05):
-    """
-    Disegna assi 3D (X=rosso, Y=verde, Z=blu) sull'immagine.
-    
-    Args:
-        img: immagine BGR
-        R: (3,3) rotation matrix
-        t: (3,) translation vector
-        K: (3,3) camera intrinsics
-        scale: lunghezza assi in metri
-    """
-    # Punti 3D degli assi
-    points_3d = np.array([
-        [0, 0, 0],
-        [scale, 0, 0],  
-        [0, scale, 0],  
-        [0, 0, scale]
-    ], dtype=np.float32)
-    
-    # Trasforma in camera coords
-    points_cam = (R @ points_3d.T).T + t
-    
-    # Proietta a 2D
-    fx, fy, cx, cy = K[0], K[4], K[2], K[5]
-    points_2d = []
-    for p in points_cam:
-        if p[2] > 0: 
-            u = int(fx * p[0] / p[2] + cx)
-            v = int(fy * p[1] / p[2] + cy)
-            points_2d.append((u, v))
-        else:
-            points_2d.append(None)
-    
-    if all(p is not None for p in points_2d):
-        origin = points_2d[0]
-        cv2.line(img, origin, points_2d[1], (0, 0, 255), 3)    
-        cv2.line(img, origin, points_2d[2], (0, 255, 0), 3)    
-        cv2.line(img, origin, points_2d[3], (255, 0, 0), 3)
-    
-    return img
+from utils.pose_utils import quaternion_to_rotation_matrix
+from utils.visualization import draw_3d_bbox_colored, draw_axis_colored
 
-
-def draw_3d_bbox_colored(img, R, t, K, obj_id, models_info, color=(255, 255, 0)):
-    """Versione con colore personalizzabile per GT vs Pred."""
-    info = models_info[obj_id]
-    min_x, min_y, min_z = info['min_x'], info['min_y'], info['min_z']
-    size_x, size_y, size_z = info['size_x'], info['size_y'], info['size_z']
-    
-    corners_3d = np.array([
-        [min_x, min_y, min_z],
-        [min_x + size_x, min_y, min_z],
-        [min_x + size_x, min_y + size_y, min_z],
-        [min_x, min_y + size_y, min_z],
-        [min_x, min_y, min_z + size_z],
-        [min_x + size_x, min_y, min_z + size_z],
-        [min_x + size_x, min_y + size_y, min_z + size_z],
-        [min_x, min_y + size_y, min_z + size_z]
-    ], dtype=np.float32)
-    
-    corners_cam = (R @ corners_3d.T).T + t * 1000
-    
-    fx, fy, cx, cy = K[0], K[4], K[2], K[5]
-    corners_2d = []
-    for p in corners_cam:
-        if p[2] > 0:
-            u = int(fx * p[0] / p[2] + cx)
-            v = int(fy * p[1] / p[2] + cy)
-            corners_2d.append((u, v))
-        else:
-            return img
-    
-    # Draw con colore specificato
-    edges = [
-        (0,1), (1,2), (2,3), (3,0),
-        (4,5), (5,6), (6,7), (7,4),
-        (0,4), (1,5), (2,6), (3,7)
-    ]
-    for e in edges:
-        cv2.line(img, corners_2d[e[0]], corners_2d[e[1]], color, 2)
-    
-    return img
-
-
-def draw_axis_colored(img, R, t, K, scale=0.05, colors=None):
-    """Versione con colori personalizzabili per GT vs Pred."""
-    if colors is None:
-        colors = [(0, 0, 255), (0, 255, 0), (255, 0, 0)] 
-    
-    points_3d = np.array([
-        [0, 0, 0],
-        [scale, 0, 0],
-        [0, scale, 0],
-        [0, 0, scale]
-    ], dtype=np.float32)
-    
-    points_cam = (R @ points_3d.T).T + t
-    
-    fx, fy, cx, cy = K[0], K[4], K[2], K[5]
-    points_2d = []
-    for p in points_cam:
-        if p[2] > 0:
-            u = int(fx * p[0] / p[2] + cx)
-            v = int(fy * p[1] / p[2] + cy)
-            points_2d.append((u, v))
-        else:
-            points_2d.append(None)
-    
-    if all(p is not None for p in points_2d):
-        origin = points_2d[0]
-        cv2.line(img, origin, points_2d[1], colors[0], 3)  
-        cv2.line(img, origin, points_2d[2], colors[1], 3)
-        cv2.line(img, origin, points_2d[3], colors[2], 3)
-    
-    return img
-
-
-def visualize_predictions(
+def visualize_baseline_predictions(
     dataset_root,
     cam_k,
     image_path,
@@ -322,12 +209,12 @@ def visualize_predictions(
                 rot_error = np.degrees(np.arccos(np.clip((np.trace(R_diff) - 1) / 2, -1.0, 1.0)))
                 
                 print(f"\n ERRORS:")
-                print(f"     BBox IoU (2D):        {bbox_iou:.2%}  ← YOLO detection accuracy")
-                print(f"     Translation Error:    {trans_error:.2f} cm")
+                print(f"     BBox IoU (2D) by YOLO: {bbox_iou:.2%}")
+                print(f"     Translation Error: {trans_error:.2f} cm")
                 print(f"       - X error: {trans_diff[0]:6.2f} cm")
                 print(f"       - Y error: {trans_diff[1]:6.2f} cm")
-                print(f"       - Z error (depth): {trans_diff[2]:6.2f} cm  ← Main issue!")
-                print(f"     Rotation Error:       {rot_error:.2f}°")
+                print(f"       - Z error (depth): {trans_diff[2]:6.2f} cm")
+                print(f"     Rotation Error: {rot_error:.2f}°")
     
     print("\n" + "="*70 + "\n")
 

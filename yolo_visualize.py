@@ -7,27 +7,10 @@ from ultralytics import YOLO
 import cv2
 import matplotlib.pyplot as plt
 import os
-import numpy as np
 from pathlib import Path
 
-
-def draw_box(img, box, color, label, thickness=3):
-    """Draw bounding box on image with label."""
-    x1, y1, x2, y2 = map(int, box)
-    cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness)
-    cv2.putText(img, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-    return img
-
-
-def yolo_to_xyxy(yolo_box, img_width, img_height):
-    """Convert YOLO format (x_center, y_center, width, height) to (x1, y1, x2, y2)."""
-    x_center, y_center, width, height = yolo_box
-    x1 = (x_center - width/2) * img_width
-    y1 = (y_center - height/2) * img_height
-    x2 = (x_center + width/2) * img_width
-    y2 = (y_center + height/2) * img_height
-    return [x1, y1, x2, y2]
-
+from utils.pose_utils import yolo_to_xyxy
+from utils.visualization import draw_2d_bbox
 
 def visualize_yolo_predictions(
     yolo_model_path,
@@ -76,7 +59,7 @@ def visualize_yolo_predictions(
             cls = int(box.cls)
             conf = box.conf.item()
             label = f"Pred: Class {cls} ({conf:.2f})"
-            img = draw_box(img, xyxy, (255, 0, 0), label)
+            img = draw_2d_bbox(img, xyxy, (255, 0, 0), label)
 
         # Load and draw ground truth (GREEN)
         label_file = os.path.join(
@@ -93,7 +76,7 @@ def visualize_yolo_predictions(
                         yolo_box = [float(x) for x in parts[1:5]]
                         xyxy_gt = yolo_to_xyxy(yolo_box, img_width, img_height)
                         label_gt = f"GT: Class {cls_gt}"
-                        img = draw_box(img, xyxy_gt, (0, 255, 0), label_gt, thickness=2)
+                        img = draw_2d_bbox(img, xyxy_gt, (0, 255, 0), label_gt, thickness=2)
 
         # Display
         plt.figure(figsize=(15, 10))

@@ -6,4 +6,5 @@ datasets/
 runs/
 checkpoints/best_pose_model.pt
 checkpoints/best_model_letterbox.pt
+checkpoints/best_fusion_model.pt
 appunti.md

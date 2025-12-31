@@ -6,17 +6,15 @@ from PIL import Image
 import numpy as np
 import torchvision.transforms as transforms
 
-IMG_WIDTH = 640
-IMG_HEIGHT = 480
-SYMMETRIC_OBJECTS = [10, 11]
+from utils.pose_utils import IMG_HEIGHT, IMG_WIDTH
 
 class CustomDatasetPose(Dataset):
     def __init__(self, dataset_root, split='train', train_ratio=0.8, seed=42, cam_K=None):
         """
         Args:
             dataset_root (str): Path to the dataset directory.
-            split (str): 'train', 'validation' or 'test'.
-            train_ratio (float): Percentage of data used for training.
+            split (str): 'train' or 'test'.
+            train_ratio (float): Percentage of data used for training (default 0.8 = 80%).
             seed (int): Random seed for reproducibility.
             camera intrinsics:
             image mean:
@@ -24,6 +22,8 @@ class CustomDatasetPose(Dataset):
 
         Carica e preprocessa i dati.
         Serve al modello di 6D pose estimation baseline (che usa solo immagini RGB).
+        
+        NOTE: Split 80/20 - Durante training si usa test set anche per validation.
         """
         from sklearn.model_selection import train_test_split
         
@@ -39,24 +39,16 @@ class CustomDatasetPose(Dataset):
         if not self.samples:
             raise ValueError(f"No samples found in {str(self.dataset_root)}. Check the dataset path and structure.")
 
-        # Split dataset into [training set] and [validation set + test set]
+        # Split dataset into [training set 80%] and [test set 20%]
         labels = [elem[0] for elem in self.samples]
-        self.train_samples, self.val_test_samples = train_test_split(
+        self.train_samples, self.test_samples = train_test_split(
             self.samples, train_size=self.train_ratio, random_state=self.seed, stratify=labels
-        )
-
-        # split [validation set + test set] into [validation set] and [test set]
-        labels = [elem[0] for elem in self.val_test_samples]
-        self.val_samples, self.test_samples = train_test_split(
-            self.val_test_samples, train_size=0.5, random_state=self.seed, stratify=labels
         )
 
         # Select the appropriate split
         if split == "train":
             self.samples = self.train_samples
-        elif split == "validation":
-            self.samples = self.val_samples
-        else:
+        else:  # split == "test"
             self.samples = self.test_samples
 
         self.image_mean = torch.tensor([0.485, 0.456, 0.406])
@@ -179,6 +171,149 @@ class CustomDatasetPose(Dataset):
         """
         img = Image.open(img_path).convert("RGB")
         return self.transform_img(img)
+    
+    def compute_yolo_bbox(self, bbox_base):
+        """
+        Calcola bbox in formato YOLO normalizzato con gestione dei bordi.
+        
+        Args:
+            bbox_base: (x_min, y_min, width, height) in pixels
+        
+        Returns:
+            bbox_YOLO: (x_center_norm, y_center_norm, width_norm, height_norm) normalizzato [0,1]
+        """
+        x_min, y_min, width, height = bbox_base
+        x_center = x_min + width / 2
+        y_center = y_min + height / 2
+
+        # Gestione bbox parzialmente fuori dall'immagine
+        # Se il centro è fuori, lo clippiamo E aggiustiamo width/height di conseguenza
+        if x_center < 0:
+            width += 2 * x_center  # x_center è negativo, sottraiamo
+            x_center = 0
+        elif x_center > IMG_WIDTH:
+            width -= 2 * (x_center - IMG_WIDTH)
+            x_center = IMG_WIDTH
+
+        if y_center < 0:
+            height += 2 * y_center
+            y_center = 0
+        elif y_center > IMG_HEIGHT:
+            height -= 2 * (y_center - IMG_HEIGHT)
+            y_center = IMG_HEIGHT
+
+        # Assicurati che width/height non siano negativi
+        width = max(0, width)
+        height = max(0, height)
+        
+        # Normalizza rispetto alle dimensioni immagine
+        bbox_YOLO = np.array([
+            x_center / IMG_WIDTH,
+            y_center / IMG_HEIGHT,
+            width / IMG_WIDTH,
+            height / IMG_HEIGHT
+        ], dtype=np.float32)
+        
+        return bbox_YOLO
+    
+    def apply_bbox_jitter(self, bbox, img_width, img_height):
+        """
+        Applica random jitter al bbox per Data Augmentation.
+        CRITICO: Questo metodo viene usato sia per RGB che per Depth per mantenere l'allineamento.
+        
+        Args:
+            bbox: (x, y, w, h) - top-left corner and size
+            img_width: larghezza immagine
+            img_height: altezza immagine
+        
+        Returns:
+            bbox_jittered: (x, y, w, h) dopo jittering
+        """
+        x, y, w, h = bbox
+        
+        if self.split != 'train':
+            return bbox  # Nessun jitter in val/test
+        
+        # 1. Random Scale (zoom in/out del +/- 10%)
+        scale_factor = np.random.uniform(0.9, 1.1)
+        w_new = w * scale_factor
+        h_new = h * scale_factor
+        
+        # 2. Random Shift (spostamento centro +/- 10%)
+        center_x = x + w / 2
+        center_y = y + h / 2
+        
+        shift_x = (np.random.rand() - 0.5) * 0.2 * w
+        shift_y = (np.random.rand() - 0.5) * 0.2 * h
+        
+        center_x_new = center_x + shift_x
+        center_y_new = center_y + shift_y
+        
+        # 3. Ricalcolo top-left corner
+        x_new = center_x_new - w_new / 2
+        y_new = center_y_new - h_new / 2
+        
+        # 4. Clamping (sicurezza bordi)
+        x_new = max(0, min(x_new, img_width - 1))
+        y_new = max(0, min(y_new, img_height - 1))
+        
+        available_w = img_width - x_new
+        available_h = img_height - y_new
+        
+        w_new = min(w_new, available_w)
+        h_new = min(h_new, available_h)
+        
+        # Validazione finale
+        if w_new > 1 and h_new > 1:
+            return (x_new, y_new, w_new, h_new)
+        else:
+            return bbox  # Fallback al bbox originale
+
+    def _crop_and_pad_image(self, img, bbox, resample=Image.BILINEAR):
+        """
+        Metodo PURO per crop + letterbox padding + resize.
+        Non applica jitter - usa il bbox fornito così com'è.
+        
+        Args:
+            img: PIL Image
+            bbox: (x, y, w, h) - può essere già jitterato o no
+            resample: Metodo di resampling per resize (default: BILINEAR)
+                     - Image.BILINEAR: Per RGB (smooth interpolation)
+                     - Image.NEAREST: Per Depth (preserva valori esatti)
+        
+        Returns:
+            PIL Image preprocessata (224, 224)
+        """
+        x, y, w, h = bbox
+        
+        # Convertiamo in interi per PIL e facciamo il crop
+        crop_rect = (
+            int(x), 
+            int(y), 
+            int(x) + max(1, int(w)), 
+            int(y) + max(1, int(h))
+        )
+        
+        cropped_img = img.crop(crop_rect)
+
+        # --- Letterbox Padding: Padding Quadrato + Resize ---
+        w_crop, h_crop = cropped_img.size
+        max_dim = max(w_crop, h_crop)
+
+        # Creiamo immagine quadrata nera (RGB o grayscale dipende dall'input)
+        mode = img.mode
+        fill_value = 0
+        square_img = Image.new(mode, (max_dim, max_dim), fill_value)
+
+        # Incolliamo il crop al centro
+        offset_x = (max_dim - w_crop) // 2
+        offset_y = (max_dim - h_crop) // 2
+        square_img.paste(cropped_img, (offset_x, offset_y))
+        
+        # Resize finale a 224x224 con metodo di resampling specificato
+        square_img = square_img.resize((224, 224), resample)
+
+        return square_img
 
     def load_cropped_image(self, img_path, bbox):
             """
@@ -188,77 +323,13 @@ class CustomDatasetPose(Dataset):
             l'imperfezione di YOLO e rendere la rete più robusta.
             """
             img = Image.open(img_path).convert("RGB")
-            img_w, img_h = img.size # Dimensioni originali immagine (es. 640x480)
+            img_w, img_h = img.size
             
-            x, y, w, h = bbox
-
-            # --- BBox Jittering ---
-            # Lo facciamo solo in training per Data Augmentation
-            if self.split == 'train':
-                # 1. Random Scale (zoom in/out del +/- 10%)
-                # Simula YOLO che fa box leggermente più grandi o piccoli del vero
-                scale_factor = np.random.uniform(0.9, 1.1) 
-                w_new = w * scale_factor
-                h_new = h * scale_factor
-
-                # 2. Random Shift (spostamento centro +/- 10% della dimensione)
-                # Simula YOLO che non centra perfettamente l'oggetto
-                center_x = x + w / 2
-                center_y = y + h / 2
-                
-                shift_x = (np.random.rand() - 0.5) * 0.2 * w # +/- 10% larghezza
-                shift_y = (np.random.rand() - 0.5) * 0.2 * h # +/- 10% altezza
-                
-                center_x_new = center_x + shift_x
-                center_y_new = center_y + shift_y
-
-                # 3. Ricalcolo angolo in alto a sinistra (x, y) dal nuovo centro
-                x_new = center_x_new - w_new / 2
-                y_new = center_y_new - h_new / 2
-
-                # 4. Clamping (Sicurezza bordi)
-                # Evitiamo coordinate negative o fuori dall'immagine 640x480
-                x_new = max(0, min(x_new, img_w - 1))
-                y_new = max(0, min(y_new, img_h - 1))
-                
-                # Se il box allargato esce a destra/sotto, lo tagliamo
-                # Calcoliamo lo spazio rimanente da x_new al bordo destro
-                available_w = img_w - x_new
-                available_h = img_h - y_new
-                
-                w_new = min(w_new, available_w)
-                h_new = min(h_new, available_h)
-
-                # Sovrascriviamo le coordinate originali solo se le nuove dimensioni hanno senso (>1px)
-                if w_new > 1 and h_new > 1:
-                    x, y, w, h = x_new, y_new, w_new, h_new
-
-            # Convertiamo in interi per PIL e facciamo il crop
-            # Usiamo max(1, ...) per sicurezza estrema contro crash su crop vuoti
-            crop_rect = (
-                int(x), 
-                int(y), 
-                int(x) + max(1, int(w)), 
-                int(y) + max(1, int(h))
-            )
+            # Applica jittering (metodo centralizzato)
+            bbox_jittered = self.apply_bbox_jitter(bbox, img_w, img_h)
             
-            cropped_img = img.crop(crop_rect)
-
-            # --- Letterbox Padding: Padding Quadrato + Resize ---
-            w_crop, h_crop = cropped_img.size
-            max_dim = max(w_crop, h_crop)
-
-            # Creiamo immagine quadrata nera
-            square_img = Image.new('RGB', (max_dim, max_dim), (0, 0, 0))
-
-            # Incolliamo il crop al centro
-            offset_x = (max_dim - w_crop) // 2
-            offset_y = (max_dim - h_crop) // 2
-            square_img.paste(cropped_img, (offset_x, offset_y))
-            
-            # Resize finale a 224x224 (input ResNet)
-            # Importante: ora che è quadrata, il resize non deforma l'aspect ratio dell'oggetto
-            square_img = square_img.resize((224, 224), Image.BILINEAR)
+            # Crop usando il metodo puro (condiviso con la classe figlia)
+            square_img = self._crop_and_pad_image(img, bbox_jittered)
 
             return self.transform_crop(square_img)
 
@@ -272,38 +343,12 @@ class CustomDatasetPose(Dataset):
         rotation = np.array(pose['cam_R_m2c'], dtype=np.float32).reshape(3, 3)  # [3x3] ---> rotation matrix
         quaternion = np.array(pose['quaternion'], dtype=np.float32)  # [4] ---> quaternion
         bbox_base = np.array(pose['obj_bb'], dtype=np.float32) # [4] ---> x_min, y_min, width, height
-        # bbox is top left corner and width and height info, YOLO needs center coordinates and width and height
         obj_id = np.array(pose['obj_id'], dtype=np.float32) # [1] ---> label
         
         cropped_img = self.load_cropped_image(str(self.dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png"), bbox_base)
 
-        # compute initial center
-        x_min, y_min, width, height = np.array(pose['obj_bb'], dtype=np.float32)
-        x_center = x_min + width / 2
-        y_center = y_min + height / 2
-
-        # slip center to image bounds and adjust width/height accordingly
-        if x_center < 0:
-            width += 2 * x_center  # x_center is negative, subtract its absolute value * 2 from width
-            x_center = 0
-        elif x_center > IMG_WIDTH:
-            width -= 2 * (x_center - IMG_WIDTH)
-            x_center = IMG_WIDTH
-
-        if y_center < 0:
-            height += 2 * y_center
-            y_center = 0
-        elif y_center > IMG_HEIGHT:
-            height -= 2 * (y_center - IMG_HEIGHT)
-            y_center = IMG_HEIGHT
-
-        # ensure width and height are not negative.
-        # This is when bounding box is completely outside image (it should never happen)
-        width = max(0, width)
-        height = max(0, height)
-        # store coordinates of the center and width and height of the bounding box normalized to the
-        # image width=640 pixels and height=480 pixels
-        bbox_YOLO = np.array([x_center/IMG_WIDTH, y_center/IMG_HEIGHT, width/IMG_WIDTH, height/IMG_HEIGHT], dtype=np.float32)
+        # Calcola bbox YOLO usando il metodo centralizzato
+        bbox_YOLO = self.compute_yolo_bbox(bbox_base)
 
         return cropped_img, translation, rotation, quaternion, bbox_base, obj_id, bbox_YOLO
 

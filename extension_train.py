@@ -12,6 +12,7 @@ def train_one_epoch(
         loader,
         criterion,
         optimizer,
+        scaler,
         device
     ):
 
@@ -25,37 +26,35 @@ def train_one_epoch(
     pbar = tqdm(loader, desc="**Training**")
     for batch in pbar:
         # Sposta dati su GPU
-        rgb = batch['cropped_img'].to(device)
-        depth = batch['cropped_depth'].to(device)
-        bbox_center = batch['bbox_center_pixel'].to(device)
+        cropped_img = batch['cropped_img'].to(device, non_blocking=True)
+        gt_quaternion = batch['quaternion'].to(device, non_blocking=True)
+        gt_translation = batch['translation'].to(device, non_blocking=True)
+        bbox_center = batch['bbox_center_pixel'].to(device, non_blocking=True)
+        cropped_depth = batch['cropped_depth'].to(device, non_blocking=True)
+        obj_id = batch['obj_id'].to(device, non_blocking=True).long()
         
-        gt_quat = batch['quaternion'].to(device)
-        gt_trans = batch['translation'].to(device)
-        obj_id = batch['obj_id'].to(device)
+        optimizer.zero_grad(set_to_none=True)
         
-        optimizer.zero_grad()
-        
-        # eventualmente includere pred e loss in
-        # 'with torch.cuda.amp.autocast(enabled=True):'
+        with torch.amp.autocast(device_type='cuda', enabled=True):
+            # forward
+            pred_quat, pred_trans, pred_2d = model(cropped_img, cropped_depth, bbox_center)
+                
+            loss_dict = criterion(
+                pred_quat=pred_quat, 
+                pred_trans=pred_trans, 
+                gt_quat=gt_quaternion, 
+                gt_trans=gt_translation, 
+                pred_2d=pred_2d,
+                class_ids=obj_id
+            )
 
-        # forward
-        pred_quat, pred_trans, pred_2d = model(rgb, depth, bbox_center)
-            
-        # loss
-        loss_dict = criterion(
-            pred_quat=pred_quat, 
-            pred_trans=pred_trans, 
-            gt_quat=gt_quat, 
-            gt_trans=gt_trans, 
-            pred_2d=pred_2d
-        )
-
-        loss = loss_dict['total_loss']
+            loss = loss_dict['total_loss']
         
-        # backward
-        loss.backward()
-
-        optimizer.step()
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        scaler.step(optimizer)
+        scaler.update()
         
         # logging
         total_loss_sum += loss.item()
@@ -82,23 +81,24 @@ def validate(model, loader, criterion, device):
     
     with torch.no_grad():
         for batch in tqdm(loader, desc="**Validation**"):
-            rgb = batch['cropped_img'].to(device)
-            depth = batch['cropped_depth'].to(device)
-            bbox_center = batch['bbox_center_pixel'].to(device)
+            cropped_img = batch['cropped_img'].to(device, non_blocking=True)
+            gt_quaternion = batch['quaternion'].to(device, non_blocking=True)
+            gt_translation = batch['translation'].to(device, non_blocking=True)
+            bbox_center = batch['bbox_center_pixel'].to(device, non_blocking=True)
+            cropped_depth = batch['cropped_depth'].to(device, non_blocking=True)
+            obj_id = batch['obj_id'].to(device, non_blocking=True).long()
 
-            gt_quat = batch['quaternion'].to(device)
-            gt_trans = batch['translation'].to(device)
-            obj_id = batch['obj_id'].to(device)
-            
-            pred_quat, pred_trans, pred_2d = model(rgb, depth, bbox_center)
-            
-            loss_dict = criterion(
-                pred_quat=pred_quat, 
-                pred_trans=pred_trans, 
-                gt_quat=gt_quat, 
-                gt_trans=gt_trans, 
-                pred_2d=pred_2d
-            )
+            with torch.amp.autocast(device_type='cuda', enabled=True):
+                pred_quat, pred_trans, pred_2d = model(cropped_img, cropped_depth, bbox_center)
+                
+                loss_dict = criterion(
+                    pred_quat=pred_quat, 
+                    pred_trans=pred_trans, 
+                    gt_quat=gt_quaternion, 
+                    gt_trans=gt_translation, 
+                    pred_2d=pred_2d,
+                    class_ids=obj_id 
+                )
             
             total_loss_sum += loss_dict['total_loss'].item()
             rotation_loss_sum += loss_dict['rot_loss'].item()
@@ -120,10 +120,12 @@ def train(
     cam_k,
     checkpoint_dir='checkpoints',
     epochs=50,
-    lr=1e-4,
+    lr_rgb_backbone=1e-5,
+    lr_new_components=1e-4,
     weight_decay=1e-5,
     device='cuda',
-    freeze_epochs=5
+    freeze_rgb_epochs=5,
+    resume_from_checkpoint=None
 ):
     model = FusionPoseNet(
         cam_k=cam_k
@@ -135,85 +137,103 @@ def train(
 
     params = [
         # Gruppo 1: Backbone RGB (Transfer Learning) -> LR molto basso
-        {'params': model.rgb_backbone.parameters(), 'lr': 1e-5}, 
+        {'params': model.rgb_backbone.parameters(), 'lr': lr_rgb_backbone}, 
         
         # Gruppo 2: Backbone Depth e Fusione
-        {'params': model.depth_backbone.parameters(), 'lr': lr},
-        {'params': model.fusion_fc.parameters(), 'lr': lr},
+        {'params': model.depth_backbone.parameters(), 'lr': lr_new_components},
+        {'params': model.fusion_fc.parameters(), 'lr': lr_new_components},
         
         # Gruppo 3: Le Tre Teste
-        {'params': model.rot_head.parameters(), 'lr': lr},
-        {'params': model.z_head.parameters(), 'lr': lr},      # Testa per Z (metri)
-        {'params': model.offset_head.parameters(), 'lr': lr}, # Testa per Offset (pixel)
+        {'params': model.rot_head.parameters(), 'lr': lr_new_components},
+        {'params': model.z_head.parameters(), 'lr': lr_new_components},      # Testa per Z (metri)
+        {'params': model.offset_head.parameters(), 'lr': lr_new_components}, # Testa per Offset (pixel)
 
         # Gruppo 4: Parametri Learnable della Loss (s_rot, s_trans, s_proj)
-        {'params': criterion.parameters(), 'lr': lr}
+        {'params': criterion.parameters(), 'lr': lr_new_components}
     ]
 
-    # sto applicando bene il lr differenziale ???
     optimizer = optim.AdamW(
         params,
-        lr=lr,
         weight_decay=weight_decay
     )
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, 
-        T_max=epochs, 
-        eta_min=1e-6
-    )
-    # oppure
-    #scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-    #    optimizer, 
-    #    mode='min', 
-    #    factor=0.5, 
-    #    patience=5, 
-    #    min_lr=1e-7
-    #)
-
-    # Freeze iniziale RGB se vuoi (Transfer Learning)
-    model.freeze_rgb()
     
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, 
+        mode='min',
+        factor=0.5,
+        patience=10,
+        min_lr=1e-7,
+        verbose=True
+    )
+
+    scaler = torch.amp.GradScaler('cuda', enabled=True)
+    
+    start_epoch = 0
     best_loss = float('inf')
     
-    for epoch in range(epochs):
-        print(f"Epoch {epoch+1}")
+    # Resume from checkpoint se fornito
+    if resume_from_checkpoint is not None:
+        print(f"Loading checkpoint from {resume_from_checkpoint}")
+        checkpoint = torch.load(resume_from_checkpoint, map_location=device)
+        
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        
+        if 'scaler_state_dict' in checkpoint:
+            scaler.load_state_dict(checkpoint['scaler_state_dict'])
+        
+        start_epoch = checkpoint['epoch']
+        best_loss = checkpoint['best_loss']
+        
+        print(f"Resumed from epoch {start_epoch} with best loss {best_loss:.4f}")
+    
+    print("Mixed Precision (AMP): ENABLED")
 
-        lr_backbone = optimizer.param_groups[0]['lr'] # Gruppo RGB
-        lr_head = optimizer.param_groups[1]['lr']     # Gruppo Depth/Fusion (prendiamo l'indice 1 come esempio)
+    # Freeze iniziale RGB (Transfer Learning)
+    model.freeze_rgb()
+    
+    for epoch in range(start_epoch, epochs):
+        print(f"\nEpoch {epoch+1}/{epochs}")
+
+        lr_backbone = optimizer.param_groups[0]['lr']
+        lr_head = optimizer.param_groups[1]['lr']
         
         print(f"LR Backbone RGB: {lr_backbone:.2e} | LR Heads: {lr_head:.2e}")
 
-        if epoch == freeze_epochs:
+        if epoch == freeze_rgb_epochs:
             model.unfreeze_rgb()
             print(">>> Unfreezing RGB backbone...")
             
-        train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, device)
+        train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device)
         print(
             f"  Train Loss: {train_avg_metrics['total_loss_avg']:.4f} "
-            f"(Rot loss: {train_avg_metrics['rot_loss_avg']:.4f}, Transaltion Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm), 2D Object Center Err: {train_avg_metrics['proj_err_px_avg']}"
+            f"(Rot: {train_avg_metrics['rot_loss_avg']:.4f}, Trans: {train_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj: {train_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
 
         val_avg_metrics = validate(model, val_loader, criterion, device)
         print(
             f"  Val Loss: {val_avg_metrics['total_loss_avg']:.4f} "
-            f"(Rot loss: {train_avg_metrics['rot_loss_avg']:.4f}, Transaltion Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm), 2D Object Center Err: {train_avg_metrics['proj_err_px_avg']}"
+            f"(Rot: {val_avg_metrics['rot_loss_avg']:.4f}, Trans: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
         
-        scheduler.step()
+        scheduler.step(val_avg_metrics['total_loss_avg'])
 
         if val_avg_metrics['total_loss_avg'] < best_loss:
             best_loss = val_avg_metrics['total_loss_avg']
             
-            # Creiamo un dizionario con TUTTO quello che serve
             checkpoint_dict = {
                 'epoch': epoch + 1,
-                'model_state_dict': model.state_dict(),         # I pesi del modello
-                'optimizer_state_dict': optimizer.state_dict(), # Stato dell'optimizer (momentum, ecc)
-                'scheduler_state_dict': scheduler.state_dict(), # Stato dello scheduler LR
-                'best_loss': best_loss,                         # Il valore della loss migliore
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'scaler_state_dict': scaler.state_dict(),  # ✅ Salva anche scaler
+                'best_loss': best_loss,
             }
             
             save_path = str(Path(checkpoint_dir) / "best_fusion_model.pt")
             torch.save(checkpoint_dict, save_path)
-            print(f"Checkpoint salvato: {save_path} (Loss: {best_loss:.4f})")
-        print("\n")
+            print(f"✓ Checkpoint salvato: {save_path} (Loss: {best_loss:.4f})")
+        print()
+    
+    print("\nTraining completed!")

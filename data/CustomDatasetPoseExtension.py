@@ -10,34 +10,21 @@ class RGBDDatasetPose(CustomDatasetPose):
         # Trasformazione specifica per depth: Normalizzazione semplice
         # Non usiamo ImageNet mean/std per la depth perchè non ha senso fisico qui
     
-    # - normalizzare in range [0, 1] o altro ???
-    # - applicare jitter anche qui nel caso lo si fa nel crop !!!
     def load_cropped_depth(self, folder_id, sample_id, bbox):
         """
         Carica immagine depth, la croppa e la normalizza.
+        CRITICO: Usa lo stesso bbox (già jitterato se in training) per mantenere allineamento con RGB.
+        
+        IMPORTANTE: Usa Image.NEAREST per preservare valori di profondità esatti sui bordi.
         """
         # path della depth image 'dataset_root/data/01/depth/0000.png'
         depth_path = self.dataset_root / "data" / f"{folder_id:02d}" / "depth" / f"{sample_id:04d}.png"
         
         # Carica immagine a 16-bit (valori in millimetri)
-        depth_img = Image.open(str(depth_path)) 
+        depth_img = Image.open(str(depth_path))
         
-        # Crop usando lo stesso bbox dell'RGB
-        x, y, w, h = bbox
-        cropped_depth = depth_img.crop((x, y, x+w, y+h))
-        
-        # Padding e Resize a 224x224 (come fatto per RGB in CustomDatasetPose)
-        w_crop, h_crop = cropped_depth.size
-        max_dim = max(w_crop, h_crop)
-        square_depth = Image.new('I', (max_dim, max_dim), 0) # 'I' per 16-bit integer
-        
-        offset_x = (max_dim - w_crop) // 2
-        offset_y = (max_dim - h_crop) // 2
-        square_depth.paste(cropped_depth, (offset_x, offset_y))
-        
-        # Resize (Nearest neighbor è meglio per la depth per non interpolare valori falsi, 
-        # ma Bilinear va bene per CNN feature extraction)
-        square_depth = square_depth.resize((224, 224), Image.BILINEAR)
+        # Usa BILINEAR anche per la depth per aiutare la CNN
+        square_depth = self._crop_and_pad_image(depth_img, bbox, resample=Image.BILINEAR)
         
         # Conversione in Tensor: da (H, W) a (1, H, W) e in metri
         depth_tensor = torch.tensor(np.array(square_depth), dtype=torch.float32)
@@ -45,7 +32,7 @@ class RGBDDatasetPose(CustomDatasetPose):
 
         # in training applico data augmentation alla depth
         if self.split == 'train':
-            noise = torch.randn_like(depth_tensor) * 0.005 # +/- 3mm di rumore
+            noise = torch.randn_like(depth_tensor) * 0.005 # +/- 5mm di rumore
             mask = torch.rand_like(depth_tensor) > 0.10 # 10% dei pixel persi
             depth_tensor = (depth_tensor + noise) * mask
 
@@ -54,23 +41,56 @@ class RGBDDatasetPose(CustomDatasetPose):
         return depth_tensor
 
     def __getitem__(self, idx):
-        # dati base dalla classe padre
-        data = super().__getitem__(idx)
-        
         folder_id, sample_id = self.samples[idx]
         
-        # Recupera il bbox ground truth per fare il crop.
-        # Nota: bbox_base è [x_min, y_min, w, h]
-        bbox_base = data['bbox_base'].numpy()
+        # 1. Carica bbox ground truth
+        bbox_base = np.array(self.ground_truths[folder_id][sample_id]['obj_bb'], dtype=np.float32)
         
-        # Carica depth processata
-        depth_tensor = self.load_cropped_depth(folder_id, sample_id, bbox_base)
-        data['cropped_depth'] = depth_tensor
+        # 2. CRITICO: Applica jitter UNA SOLA VOLTA - stesso bbox per RGB e Depth
+        img_path = str(self.dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png")
+        img = Image.open(img_path).convert("RGB")
+        img_w, img_h = img.size
         
-        # IMPORTANTE: Aggiungiamo i centri del bbox in pixel per la formula Pinhole nel modello.
-        # bbox_base[0] = x_min, bbox_base[2] = width
-        cx_pixel = bbox_base[0] + bbox_base[2] / 2.0
-        cy_pixel = bbox_base[1] + bbox_base[3] / 2.0
-        data['bbox_center_pixel'] = torch.tensor([cx_pixel, cy_pixel], dtype=torch.float32)
+        bbox_jittered = self.apply_bbox_jitter(tuple(bbox_base), img_w, img_h)
         
-        return data
+        # 3. Crop RGB con bbox jitterato (usa metodo PURO della classe padre)
+        square_img = self._crop_and_pad_image(img, bbox_jittered)
+        cropped_img = self.transform_crop(square_img)
+        
+        # 4. Crop Depth con STESSO bbox jitterato (allineamento garantito!)
+        depth_tensor = self.load_cropped_depth(folder_id, sample_id, bbox_jittered)
+        
+        # 5. Carica ground truth
+        pose = self.ground_truths[folder_id][sample_id]
+        translation = np.array(pose['cam_t_m2c'], dtype=np.float32) / 1000.0
+        rotation = np.array(pose['cam_R_m2c'], dtype=np.float32).reshape(3, 3)
+        quaternion = np.array(pose['quaternion'], dtype=np.float32)
+        obj_id = np.array(pose['obj_id'], dtype=np.float32)
+        
+        # 6. Carica RGB full
+        img_tensor = self.transform_img(img)
+        
+        # 7. Calcola bbox YOLO format (usa metodo centralizzato del padre)
+        bbox_YOLO = self.compute_yolo_bbox(bbox_base)
+        
+        # 8. Bbox center in pixels (per pinhole)
+        # CRITICO: Usa bbox_jittered per coerenza geometrica con il crop!
+        # Il network vede un'immagine croppata con bbox_jittered, quindi il 
+        # reference point deve essere il centro di QUELLO, non di bbox_base.
+        # Durante inference (val/test) non c'è jitter quindi bbox_jittered == bbox_base.
+        cx_pixel = bbox_jittered[0] + bbox_jittered[2] / 2.0
+        cy_pixel = bbox_jittered[1] + bbox_jittered[3] / 2.0
+        
+        return {
+            "sample_id": torch.tensor([folder_id, sample_id]),
+            "cropped_img": cropped_img,
+            "cropped_depth": depth_tensor,
+            "rgb": img_tensor,
+            "obj_id": torch.tensor(obj_id),
+            "translation": torch.tensor(translation),
+            "rotation": torch.tensor(rotation),
+            "quaternion": torch.tensor(quaternion),
+            "bbox_base": torch.tensor(bbox_base, dtype=torch.float32),
+            "bbox_YOLO": torch.tensor(bbox_YOLO),
+            "bbox_center_pixel": torch.tensor([cx_pixel, cy_pixel], dtype=torch.float32)
+        }

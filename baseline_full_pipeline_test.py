@@ -5,12 +5,10 @@ from pathlib import Path
 from ultralytics import YOLO
 from collections import defaultdict
 
-from models.ResNetPose import ResNetPose, quaternion_to_rotation_matrix
+from models.ResNetPose import ResNetPose
 from models.PinholeCamera import PinholeCamera
-from data.CustomDatasetPose import SYMMETRIC_OBJECTS
 
-# Importiamo le metriche e la MAPPA dal file centrale
-from baseline_evaluate import (
+from utils.pose_utils import (
     compute_rotation_error, 
     compute_translation_error,
     compute_add_metric, 
@@ -18,7 +16,9 @@ from baseline_evaluate import (
     compute_add_rotation_only,
     compute_add_s_rotation_only,
     load_model_points, 
+    quaternion_to_rotation_matrix,
     print_evaluation_results_table,
+    SYMMETRIC_OBJECTS,
     YOLO_TO_LINEMOD_MAP
 )
 

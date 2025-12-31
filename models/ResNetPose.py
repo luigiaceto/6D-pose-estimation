@@ -103,39 +103,3 @@ class ResNetPose(nn.Module):
         """Unfreeze ResNet backbone."""
         for param in self.backbone.parameters():
             param.requires_grad = True
-
-
-def quaternion_to_rotation_matrix(quaternion):
-    """
-    Converte quaternion (w, x, y, z) a rotation matrix (3x3).
-    
-    Args:
-        quaternion: (B, 4) tensor
-        
-    Returns:
-        rotation_matrix: (B, 3, 3) tensor
-    """
-    batch_size = quaternion.shape[0]
-    
-    # Per FP16/AMP stability
-    eps = 1e-8 if quaternion.dtype == torch.float32 else 1e-6
-    quaternion = quaternion / (torch.norm(quaternion, dim=1, keepdim=True) + eps)
-    
-    w, x, y, z = quaternion[:, 0], quaternion[:, 1], quaternion[:, 2], quaternion[:, 3]
-    
-    # Rotation matrix elements
-    R = torch.zeros(batch_size, 3, 3, device=quaternion.device, dtype=quaternion.dtype)
-    
-    R[:, 0, 0] = 1 - 2*(y**2 + z**2)
-    R[:, 0, 1] = 2*(x*y - w*z)
-    R[:, 0, 2] = 2*(x*z + w*y)
-    
-    R[:, 1, 0] = 2*(x*y + w*z)
-    R[:, 1, 1] = 1 - 2*(x**2 + z**2)
-    R[:, 1, 2] = 2*(y*z - w*x)
-    
-    R[:, 2, 0] = 2*(x*z - w*y)
-    R[:, 2, 1] = 2*(y*z + w*x)
-    R[:, 2, 2] = 1 - 2*(x**2 + y**2)
-    
-    return R

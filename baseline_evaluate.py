@@ -8,84 +8,27 @@ Calcola metriche:
 - Translation error (cm)
 """
 
-import os
 from pathlib import Path
 import torch
 import numpy as np
-import yaml
 from tqdm import tqdm
 from collections import defaultdict
 import pandas as pd
 
-from models.ResNetPose import ResNetPose, quaternion_to_rotation_matrix
+from models.ResNetPose import ResNetPose
 from models.PinholeCamera import PinholeCamera
-from models.losses import compute_add_metric, compute_add_rotation_only, compute_add_s_metric, compute_add_s_rotation_only
-from data.CustomDatasetPose import SYMMETRIC_OBJECTS
-
-
-# 1. Nomi per visualizzazione umana
-LINEMOD_OBJECT_NAMES = {
-    1: "ape", 2: "benchvise", 4: "camera", 5: "can", 6: "cat",
-    8: "driller", 9: "duck", 10: "eggbox", 11: "glue",
-    12: "holepuncher", 13: "iron", 14: "lamp", 15: "phone",
-    "ALL": "ALL"
-}
-
-# 2. Traduzione da YOLO (0,1,2...) a LINEMOD (1,2,4...)
-YOLO_TO_LINEMOD_MAP = {
-    0: 1,  
-    1: 2,  
-    2: 4,  
-    3: 5,  
-    4: 6,  
-    5: 8,  
-    6: 9,  
-    7: 10, 
-    8: 11, 
-    9: 12, 
-    10: 13,
-    11: 14,
-    12: 15 
-}
-
-def load_model_points(dataset_root, obj_id):
-    """Carica corner points 3D del modello."""
-    models_info_path = str(dataset_root / "models" / "models_info.yml")
-    with open(models_info_path, 'r') as f:
-        models_info = yaml.load(f, Loader=yaml.CLoader)
-    
-    info = models_info[obj_id]
-    min_x, min_y, min_z = info['min_x'], info['min_y'], info['min_z']
-    size_x, size_y, size_z = info['size_x'], info['size_y'], info['size_z']
-    
-    # 8 corners del bounding box
-    corners = np.array([
-        [min_x, min_y, min_z],
-        [min_x + size_x, min_y, min_z],
-        [min_x, min_y + size_y, min_z],
-        [min_x + size_x, min_y + size_y, min_z],
-        [min_x, min_y, min_z + size_z],
-        [min_x + size_x, min_y, min_z + size_z],
-        [min_x, min_y + size_y, min_z + size_z],
-        [min_x + size_x, min_y + size_y, min_z + size_z]
-    ], dtype=np.float32) / 1000.0  # mm -> m
-    
-    return corners
-
-
-def compute_rotation_error(pred_R, gt_R):
-    """Errore di rotazione in gradi."""
-    R_diff = pred_R.T @ gt_R
-    trace = np.trace(R_diff)
-    cos_angle = np.clip((trace - 1) / 2, -1.0, 1.0)
-    angle_rad = np.arccos(cos_angle)
-    return np.degrees(angle_rad)
-
-
-def compute_translation_error(pred_t, gt_t):
-    """Errore di translation in cm."""
-    return np.linalg.norm(pred_t - gt_t) * 100  # m -> cm
-
+from utils.pose_utils import (
+    quaternion_to_rotation_matrix,  
+    compute_add_metric, 
+    compute_add_rotation_only, 
+    compute_add_s_metric, 
+    compute_add_s_rotation_only, 
+    compute_rotation_error,
+    compute_translation_error,
+    load_model_points, 
+    print_evaluation_results_table,
+    SYMMETRIC_OBJECTS, 
+    )
 
 def evaluate(
     dataset_root,
@@ -283,48 +226,3 @@ def evaluate(
     )
 
     return print_evaluation_results_table(per_class_results, save_table, table_path)   
-
-
-def print_evaluation_results_table(metrics_per_class, save_table=False, table_path="evaluation_results.csv"):
-
-    df = pd.DataFrame(metrics_per_class)
-    
-    # Sort by class_id (keep 'ALL' at the end)
-    df_all = df[df['class_id'] == 'ALL']
-    df_classes = df[df['class_id'] != 'ALL'].sort_values('class_id')
-    df = pd.concat([df_classes, df_all], ignore_index=True)
-    
-    df['Object Name'] = df['class_id'].map(LINEMOD_OBJECT_NAMES)
-    df = df.drop(columns=['class_id'])
-    df = df.rename(
-        columns={
-            'object_name': 'Object Name',
-            'num_samples': '#Samples',
-            'accuracy_10p': 'Accuracy @10% (%)',
-            'add_r_accuracy_10p': 'ADD-R Accuracy @10% (%)',
-            'rot_mean': 'Rotation Error (deg)',
-            'trans_mean': 'Translation Error (cm)',
-            'add_mean': 'ADD / ADD-S (cm)',
-            'add_rot_only_mean': 'ADD-R (cm)'
-        }
-    )
-
-    df = df[
-        [
-            'Object Name',
-            '#Samples',
-            'Accuracy @10% (%)',
-            'ADD-R Accuracy @10% (%)',
-            'Rotation Error (deg)',
-            'Translation Error (cm)',
-            'ADD / ADD-S (cm)',
-            'ADD-R (cm)'
-        ]
-    ]
-
-    df = df.round(2)
-
-    if save_table:
-        df.to_csv(table_path, index=False)
-        print(f"Saved CSV to {table_path}")
-    return df

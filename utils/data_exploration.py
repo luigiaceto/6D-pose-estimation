@@ -6,7 +6,6 @@ import torch
 from PIL import Image
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from typing import Tuple
 from data.CustomDatasetPose import IMG_WIDTH, IMG_HEIGHT
 
 

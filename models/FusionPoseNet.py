@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
-
+from models.PinholeCamera import PinholeCamera
 
 class DepthEncoder(nn.Module):
     """
@@ -126,32 +126,26 @@ class FusionPoseNet(nn.Module):
         quaternion = self.rot_head(fused)
         quaternion = F.normalize(quaternion, p=2, dim=1)
         
-        # ** Depth Z **
-        trans_out = self.z_head(fused) # (B, 1)
-        # faccio si che Z possa essere solo > 0 (altrimenti la fotocamera
-        # non lo vedrebbe) e che sia ad almeno 10cm dalla fotocamera. Questo
-        # riduce lo spazio di ricerca ed evita anche errori numerici.
-        z_pred = F.softplus(trans_out[:, 0:1]) + 0.1 # (B, 1)
+        # ** Depth Z (Log-Space Prediction) **
+        # La rete predice s = log(Z), poi calcoliamo Z = exp(s)
+        # Vantaggi:
+        # 1. Z > 0 sempre garantito (no offset arbitrari)
+        # 2. Errore relativo invece che assoluto (10% a 0.5m = 10% a 5m)
+        # 3. Standard nella letteratura di depth estimation
+        log_z = self.z_head(fused)  # (B, 1) - predice log(Z)
+        z_pred = torch.exp(log_z[:, 0:1])  # (B, 1) - Z in metri
+        
+        # Nota: Se z_pred diventa troppo piccolo/grande, gradient clipping lo gestisce
 
         # ** Offset per u & v **
         delta_uv = self.offset_head(fused) # (B, 2)
         uv = bbox_center_pixel + delta_uv
-        u = uv[:, 0:1]
-        v = uv[:, 1:2]
 
-        # --- Differentiable Pinhole Layer ---
-        # Usiamo il buffer registrato
-        fx = self.cam_k[:, 0:1]
-        fy = self.cam_k[:, 1:2]
-        cx = self.cam_k[:, 2:3]
-        cy = self.cam_k[:, 3:4]    
-
-        # il gradiente fluirà attraverso queste due formule
-        x_pred = (u - cx) * z_pred / fx
-        y_pred = (v - cy) * z_pred / fy
-        
-        # Concateniamo per ottenere output (B, 3)
-        translation = torch.cat([x_pred, y_pred, z_pred], dim=1)
+        translation = PinholeCamera.apply_unprojection(
+            points_2d=uv,
+            depth=z_pred,
+            intrinsics=self.cam_k
+        )
         
         return quaternion, translation, uv # [predizione quaternioni, predizione traslazione, predizione centro oggetto 3D visto in 2D] 
 
