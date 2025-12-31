@@ -84,6 +84,8 @@ class PoseLoss(nn.Module):
         Args:
             pred_quat: (B, 4) predicted quaternion
             pred_trans: (B, 3) predicted translation
+            pred_quat: (B, 4) predicted quaternion
+            pred_trans: (B, 3) predicted translation
             gt_quat: (B, 4) ground truth quaternion
             gt_trans: (B, 3) ground truth translation
             class_ids: (B,) tensor con class ID per ogni sample (per hybrid mode)

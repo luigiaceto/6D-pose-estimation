@@ -20,6 +20,7 @@ def train_one_epoch(
     total_loss_sum = 0
     rotation_loss_sum = 0
     translation_error_cm_sum = 0
+    proj_err_px_sum = 0
     
     pbar = tqdm(loader, desc="**Training**")
     for batch in pbar:
@@ -38,10 +39,17 @@ def train_one_epoch(
         # 'with torch.cuda.amp.autocast(enabled=True):'
 
         # forward
-        pred_quat, pred_trans = model(rgb, depth, bbox_center)
+        pred_quat, pred_trans, pred_2d = model(rgb, depth, bbox_center)
             
         # loss
-        loss_dict = criterion(pred_quat, pred_trans, gt_quat, gt_trans, obj_id)
+        loss_dict = criterion(
+            pred_quat=pred_quat, 
+            pred_trans=pred_trans, 
+            gt_quat=gt_quat, 
+            gt_trans=gt_trans, 
+            pred_2d=pred_2d
+        )
+
         loss = loss_dict['total_loss']
         
         # backward
@@ -53,11 +61,13 @@ def train_one_epoch(
         total_loss_sum += loss.item()
         rotation_loss_sum += loss_dict['rot_loss'].item()
         translation_error_cm_sum += loss_dict['trans_err_cm'].item()
+        proj_err_px_sum += loss_dict['proj_err_px'].item()
     
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
         'rot_loss_avg': rotation_loss_sum / len(loader),
-        'trans_err_cm_avg': translation_error_cm_sum / len(loader)
+        'trans_err_cm_avg': translation_error_cm_sum / len(loader),
+        'proj_err_px_avg': proj_err_px_sum / len(loader)
     }
 
     return avg_metrics
@@ -68,6 +78,7 @@ def validate(model, loader, criterion, device):
     total_loss_sum = 0
     rotation_loss_sum = 0
     translation_error_cm_sum = 0
+    proj_err_px_sum = 0
     
     with torch.no_grad():
         for batch in tqdm(loader, desc="**Validation**"):
@@ -79,18 +90,26 @@ def validate(model, loader, criterion, device):
             gt_trans = batch['translation'].to(device)
             obj_id = batch['obj_id'].to(device)
             
-            pred_quat, pred_trans = model(rgb, depth, bbox_center)
+            pred_quat, pred_trans, pred_2d = model(rgb, depth, bbox_center)
             
-            loss_dict = criterion(pred_quat, pred_trans, gt_quat, gt_trans, obj_id)
+            loss_dict = criterion(
+                pred_quat=pred_quat, 
+                pred_trans=pred_trans, 
+                gt_quat=gt_quat, 
+                gt_trans=gt_trans, 
+                pred_2d=pred_2d
+            )
             
             total_loss_sum += loss_dict['total_loss'].item()
             rotation_loss_sum += loss_dict['rot_loss'].item()
             translation_error_cm_sum += loss_dict['trans_err_cm'].item()
+            proj_err_px_sum += loss_dict['proj_err_px'].item()
 
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
         'rot_loss_avg': rotation_loss_sum / len(loader),
-        'trans_err_cm_avg': translation_error_cm_sum / len(loader)
+        'trans_err_cm_avg': translation_error_cm_sum / len(loader),
+        'proj_err_px_avg': proj_err_px_sum / len(loader)
     }
 
     return avg_metrics
@@ -106,24 +125,28 @@ def train(
     device='cuda',
     freeze_epochs=5
 ):
-    model = FusionPoseNet(cam_k=cam_k).to(device)
+    model = FusionPoseNet(
+        cam_k=cam_k
+    ).to(device)
 
     criterion = RGBDPoseLoss(
-        lambda_rot=10.0,
-        lambda_trans=10.0
-    ).to(device) # se uso alfa e beta non-learnable non serve lambda_rot/trans
+        cam_k=cam_k
+    ).to(device)
 
     params = [
-        # Gruppo 1: La backbone RGB (già pre-addestrata) -> Learning Rate molto basso
+        # Gruppo 1: Backbone RGB (Transfer Learning) -> LR molto basso
         {'params': model.rgb_backbone.parameters(), 'lr': 1e-5}, 
         
-        # Gruppo 2: Tutto il resto (DepthEncoder, Heads, Fusion) -> Learning Rate normale
+        # Gruppo 2: Backbone Depth e Fusione
         {'params': model.depth_backbone.parameters(), 'lr': lr},
         {'params': model.fusion_fc.parameters(), 'lr': lr},
+        
+        # Gruppo 3: Le Tre Teste
         {'params': model.rot_head.parameters(), 'lr': lr},
-        {'params': model.z_head.parameters(), 'lr': lr},
+        {'params': model.z_head.parameters(), 'lr': lr},      # Testa per Z (metri)
+        {'params': model.offset_head.parameters(), 'lr': lr}, # Testa per Offset (pixel)
 
-        # Gruppo 3: i parametri della loss
+        # Gruppo 4: Parametri Learnable della Loss (s_rot, s_trans, s_proj)
         {'params': criterion.parameters(), 'lr': lr}
     ]
 
@@ -138,6 +161,14 @@ def train(
         T_max=epochs, 
         eta_min=1e-6
     )
+    # oppure
+    #scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+    #    optimizer, 
+    #    mode='min', 
+    #    factor=0.5, 
+    #    patience=5, 
+    #    min_lr=1e-7
+    #)
 
     # Freeze iniziale RGB se vuoi (Transfer Learning)
     model.freeze_rgb()
@@ -150,27 +181,22 @@ def train(
         lr_backbone = optimizer.param_groups[0]['lr'] # Gruppo RGB
         lr_head = optimizer.param_groups[1]['lr']     # Gruppo Depth/Fusion (prendiamo l'indice 1 come esempio)
         
-        print(f"LR Backbone (RGB): {lr_backbone:.8f}")
-        print(f"LR Heads (Fusion): {lr_head:.8f}")
+        print(f"LR Backbone RGB: {lr_backbone:.2e} | LR Heads: {lr_head:.2e}")
 
         if epoch == freeze_epochs:
-            # ATTENZIONE: nel caso si utilizzi unfreezing forse converrebbe
-            # ridurre tipo di un fattore 10 il learning rate ??? Bisogna comunque
-            # tenere conto che c'è anche la backbone CNN che va trainata from scratch
-            # non come la ResNet che parte pre-addestrata
             model.unfreeze_rgb()
-            print("Unfreezing RGB backbone...")
+            print(">>> Unfreezing RGB backbone...")
             
         train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, device)
         print(
             f"  Train Loss: {train_avg_metrics['total_loss_avg']:.4f} "
-            f"(Rot loss: {train_avg_metrics['rot_loss_avg']:.4f}, Transaltion Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm)"
+            f"(Rot loss: {train_avg_metrics['rot_loss_avg']:.4f}, Transaltion Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm), 2D Object Center Err: {train_avg_metrics['proj_err_px_avg']}"
         )
 
         val_avg_metrics = validate(model, val_loader, criterion, device)
         print(
             f"  Val Loss: {val_avg_metrics['total_loss_avg']:.4f} "
-            f"(Rot loss: {val_avg_metrics['rot_loss_avg']:.4f}, Translation Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm)"
+            f"(Rot loss: {train_avg_metrics['rot_loss_avg']:.4f}, Transaltion Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm), 2D Object Center Err: {train_avg_metrics['proj_err_px_avg']}"
         )
         
         scheduler.step()

@@ -252,12 +252,13 @@ def visualize_fusion_predictions(
             # --- E. Inference ---
             with torch.no_grad():
                 # Forward Pass: RGB + Depth + Center -> Quaternion + Translation
-                pred_quat, pred_trans = pose_model(tensor_rgb, tensor_depth, tensor_center)
+                pred_quat, pred_trans, pred_2d = pose_model(tensor_rgb, tensor_depth, tensor_center)
             
             # Conversioni per visualizzazione
             pred_t_np = pred_trans[0].cpu().numpy() # [x, y, z] in metri
             pred_q_np = pred_quat[0].cpu().numpy()
             pred_R_np = quaternion_to_rotation_matrix(pred_quat)[0].cpu().numpy()
+            pred_uv_np = pred_2d[0].cpu().numpy() # serve ???
             
             # --- F. Recupera Ground Truth ---
             # Usiamo la class ID di YOLO per mappare l'obj_id (class_id + 1 per LineMod solitamente)
@@ -285,7 +286,6 @@ def visualize_fusion_predictions(
                 if gt_info:
                     gt_R = np.array(gt_info['cam_R_m2c']).reshape(3, 3)
                     gt_t = np.array(gt_info['cam_t_m2c']) / 1000.0 # mm -> m
-                    gt_q = np.array(gt_info['quaternion']) if 'quaternion' in gt_info else np.zeros(4)
 
                     # --- G. Visualizzazione e Metriche ---
                     
@@ -296,6 +296,9 @@ def visualize_fusion_predictions(
                     # 2. Disegna PRED (Ciano/Arancio)
                     output_img = draw_3d_bbox_colored(output_img, pred_R_np, pred_t_np, cam_k, obj_id, models_info, color=(255, 165, 0))
                     output_img = draw_axis_colored(output_img, pred_R_np, pred_t_np, cam_k, scale=0.05, colors=[(255, 100, 0), (255, 165, 0), (200, 130, 0)])
+
+                    # disegna dove la rete pensa sia il centro dell'oggetto
+                    cv2.circle(output_img, (int(pred_uv_np[0]), int(pred_uv_np[1])), 5, (0, 255, 255), -1)
 
                     # 3. Calcolo Errori
                     trans_diff_cm = (pred_t_np - gt_t) * 100

@@ -10,7 +10,8 @@ class RGBDDatasetPose(CustomDatasetPose):
         # Trasformazione specifica per depth: Normalizzazione semplice
         # Non usiamo ImageNet mean/std per la depth perchè non ha senso fisico qui
     
-    # normalizzare in range [0, 1] o altro ???
+    # - normalizzare in range [0, 1] o altro ???
+    # - applicare jitter anche qui nel caso lo si fa nel crop !!!
     def load_cropped_depth(self, folder_id, sample_id, bbox):
         """
         Carica immagine depth, la croppa e la normalizza.
