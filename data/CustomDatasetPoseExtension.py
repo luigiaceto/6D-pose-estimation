@@ -43,37 +43,37 @@ class RGBDDatasetPose(CustomDatasetPose):
     def __getitem__(self, idx):
         folder_id, sample_id = self.samples[idx]
         
-        # 1. Carica bbox ground truth
+        # carica bbox ground truth
         bbox_base = np.array(self.ground_truths[folder_id][sample_id]['obj_bb'], dtype=np.float32)
         
-        # 2. CRITICO: Applica jitter UNA SOLA VOLTA - stesso bbox per RGB e Depth
+        # CRITICO: Applica jitter UNA SOLA VOLTA - stesso bbox per RGB e Depth
         img_path = str(self.dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png")
         img = Image.open(img_path).convert("RGB")
         img_w, img_h = img.size
         
         bbox_jittered = self.apply_bbox_jitter(tuple(bbox_base), img_w, img_h)
         
-        # 3. Crop RGB con bbox jitterato (usa metodo PURO della classe padre)
+        # crop RGB con bbox jitterato
         square_img = self._crop_and_pad_image(img, bbox_jittered)
         cropped_img = self.transform_crop(square_img)
         
-        # 4. Crop Depth con STESSO bbox jitterato (allineamento garantito!)
+        # crop Depth con STESSO bbox jitterato usato per croppare l'immagine RGB
         depth_tensor = self.load_cropped_depth(folder_id, sample_id, bbox_jittered)
         
-        # 5. Carica ground truth
+        # carica ground truth
         pose = self.ground_truths[folder_id][sample_id]
         translation = np.array(pose['cam_t_m2c'], dtype=np.float32) / 1000.0
         rotation = np.array(pose['cam_R_m2c'], dtype=np.float32).reshape(3, 3)
         quaternion = np.array(pose['quaternion'], dtype=np.float32)
         obj_id = np.array(pose['obj_id'], dtype=np.float32)
         
-        # 6. Carica RGB full
+        # carica immagine RGB completa
         img_tensor = self.transform_img(img)
         
-        # 7. Calcola bbox YOLO format (usa metodo centralizzato del padre)
+        # calcola bbox in fomatio YOLO
         bbox_YOLO = self.compute_yolo_bbox(bbox_base)
         
-        # 8. Bbox center in pixels (per pinhole)
+        # bbox center in pixels (per pinhole).
         # CRITICO: Usa bbox_jittered per coerenza geometrica con il crop!
         # Il network vede un'immagine croppata con bbox_jittered, quindi il 
         # reference point deve essere il centro di QUELLO, non di bbox_base.
@@ -82,10 +82,13 @@ class RGBDDatasetPose(CustomDatasetPose):
         cy_pixel = bbox_jittered[1] + bbox_jittered[3] / 2.0
         
         return {
+            # sample  
             "sample_id": torch.tensor([folder_id, sample_id]),
             "cropped_img": cropped_img,
             "cropped_depth": depth_tensor,
             "rgb": img_tensor,
+
+            # label/ground truth
             "obj_id": torch.tensor(obj_id),
             "translation": torch.tensor(translation),
             "rotation": torch.tensor(rotation),

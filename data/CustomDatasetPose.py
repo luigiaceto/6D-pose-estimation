@@ -55,7 +55,6 @@ class CustomDatasetPose(Dataset):
         self.image_std = torch.tensor([0.229, 0.224, 0.225])
 
         # Define image transformations for the baseline
-        # Define image transformations for the baseline
         if self.split == 'train':
             self.transform_img = transforms.ToTensor()
 
@@ -234,12 +233,12 @@ class CustomDatasetPose(Dataset):
         if self.split != 'train':
             return bbox  # Nessun jitter in val/test
         
-        # 1. Random Scale (zoom in/out del +/- 10%)
+        # random Scale (zoom in/out del +/- 10%)
         scale_factor = np.random.uniform(0.9, 1.1)
         w_new = w * scale_factor
         h_new = h * scale_factor
         
-        # 2. Random Shift (spostamento centro +/- 10%)
+        # random Shift (spostamento centro +/- 10%)
         center_x = x + w / 2
         center_y = y + h / 2
         
@@ -249,11 +248,11 @@ class CustomDatasetPose(Dataset):
         center_x_new = center_x + shift_x
         center_y_new = center_y + shift_y
         
-        # 3. Ricalcolo top-left corner
+        # ricalcolo top-left corner
         x_new = center_x_new - w_new / 2
         y_new = center_y_new - h_new / 2
         
-        # 4. Clamping (sicurezza bordi)
+        # clamping (sicurezza bordi)
         x_new = max(0, min(x_new, img_width - 1))
         y_new = max(0, min(y_new, img_height - 1))
         
@@ -263,11 +262,11 @@ class CustomDatasetPose(Dataset):
         w_new = min(w_new, available_w)
         h_new = min(h_new, available_h)
         
-        # Validazione finale
+        # check finale
         if w_new > 1 and h_new > 1:
             return (x_new, y_new, w_new, h_new)
         else:
-            return bbox  # Fallback al bbox originale
+            return bbox  # fallback al bbox originale
 
     def _crop_and_pad_image(self, img, bbox, resample=Image.BILINEAR):
         """
@@ -316,22 +315,22 @@ class CustomDatasetPose(Dataset):
         return square_img
 
     def load_cropped_image(self, img_path, bbox):
-            """
-            Load an RGB image, crop it, resize/pad and return it.
+        """
+        Load an RGB image, crop it, resize/pad and return it.
             
-            MODIFICA: Applica random jitter al bbox durante il training per simulare 
-            l'imperfezione di YOLO e rendere la rete più robusta.
-            """
-            img = Image.open(img_path).convert("RGB")
-            img_w, img_h = img.size
+        MODIFICA: Applica random jitter al bbox durante il training per simulare 
+        l'imperfezione di YOLO e rendere la rete più robusta.
+        """
+        img = Image.open(img_path).convert("RGB")
+        img_w, img_h = img.size
             
-            # Applica jittering (metodo centralizzato)
-            bbox_jittered = self.apply_bbox_jitter(bbox, img_w, img_h)
+        # Applica jittering (metodo centralizzato)
+        bbox_jittered = self.apply_bbox_jitter(bbox, img_w, img_h)
             
-            # Crop usando il metodo puro (condiviso con la classe figlia)
-            square_img = self._crop_and_pad_image(img, bbox_jittered)
+        # Crop usando il metodo puro (condiviso con la classe figlia)
+        square_img = self._crop_and_pad_image(img, bbox_jittered)
 
-            return self.transform_crop(square_img)
+        return self.transform_crop(square_img)
 
     def load_6d_pose(self, folder_id: int = None, sample_id: int = None):
         """

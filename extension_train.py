@@ -227,8 +227,8 @@ def train(
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
-                'scaler_state_dict': scaler.state_dict(),  # ✅ Salva anche scaler
-                'best_loss': best_loss,
+                'scaler_state_dict': scaler.state_dict(),
+                'best_loss': best_loss
             }
             
             save_path = str(Path(checkpoint_dir) / "best_fusion_model.pt")
