@@ -120,7 +120,7 @@ def visualize_fusion_predictions(
     results = yolo_model(image_path, verbose=False)
     
     print("\n" + "="*70)
-    print(f"VISUALIZATION (RGB-D FUSION): {os.path.basename(image_path)}")
+    print(f"VISUALIZATION: {os.path.basename(image_path)}")
     print("="*70)
     
     output_img = img_bgr.copy()
@@ -178,73 +178,75 @@ def visualize_fusion_predictions(
             pred_uv_np = pred_2d[0].cpu().numpy() # serve ???
             
             # --- F. Recupera Ground Truth ---
-            # Usiamo la class ID di YOLO per mappare l'obj_id (class_id + 1 per LineMod solitamente)
             class_id = int(boxes.cls[i])
             obj_id = class_id + 1 
             
-            # Cerchiamo nel GT se esiste questo oggetto per questa immagine
+            # Estrazione ground truth per questa immagine (come baseline)
             if img_idx in gt_data_all:
-                gt_list = gt_data_all[img_idx]
+                gt_info = gt_data_all[img_idx][0]  
+                gt_R = np.array(gt_info['cam_R_m2c']).reshape(3, 3)
+                gt_t = np.array(gt_info['cam_t_m2c']) / 1000.0  
+                gt_quat = np.array(gt_info['quaternion'])
                 
-                # Semplificazione: prendiamo il primo oggetto GT che corrisponde all'ID
-                # (In scene complesse servirebbe matching IoU, ma LineMod è simple)
-                gt_info = None
-                for obj in gt_list: # gt_list è una lista se ci sono più oggetti, o dict se processato
-                     # Nel tuo extract_ground_truth sembrava un dizionario, ma il raw yaml è lista
-                     # Adattiamo al formato standard
-                     if isinstance(obj, dict) and obj.get('obj_id', -1) == obj_id:
-                         gt_info = obj
-                         break
-                     # Fallback se il tuo yaml preprocessato ha struttura diversa
-                     elif isinstance(gt_list, dict) and gt_list.get('obj_id') == obj_id:
-                         gt_info = gt_list
-                         break
+                # Draw GROUND TRUTH (Verde)
+                output_img = draw_3d_bbox_colored(output_img, gt_R, gt_t, cam_k, obj_id, models_info, color=(0, 255, 0))
+                output_img = draw_axis_colored(output_img, gt_R, gt_t, cam_k, scale=0.05, colors=[(0, 200, 0), (0, 255, 0), (0, 180, 0)])
                 
-                if gt_info:
-                    gt_R = np.array(gt_info['cam_R_m2c']).reshape(3, 3)
-                    gt_t = np.array(gt_info['cam_t_m2c']) / 1000.0 # mm -> m
-
-                    # --- G. Visualizzazione e Metriche ---
-                    
-                    # 1. Disegna GT (Verde)
-                    output_img = draw_3d_bbox_colored(output_img, gt_R, gt_t, cam_k, obj_id, models_info, color=(0, 255, 0))
-                    output_img = draw_axis_colored(output_img, gt_R, gt_t, cam_k, scale=0.05, colors=[(0, 200, 0), (0, 255, 0), (0, 180, 0)])
-                    
-                    # 2. Disegna PRED (Ciano/Arancio)
-                    output_img = draw_3d_bbox_colored(output_img, pred_R_np, pred_t_np, cam_k, obj_id, models_info, color=(255, 165, 0))
-                    output_img = draw_axis_colored(output_img, pred_R_np, pred_t_np, cam_k, scale=0.05, colors=[(255, 100, 0), (255, 165, 0), (200, 130, 0)])
-
-                    # disegna dove la rete pensa sia il centro dell'oggetto
-                    cv2.circle(output_img, (int(pred_uv_np[0]), int(pred_uv_np[1])), 5, (0, 255, 255), -1)
-
-                    # 3. Calcolo Errori
-                    trans_diff_cm = (pred_t_np - gt_t) * 100
-                    trans_err = np.linalg.norm(trans_diff_cm)
-                    
-                    # Errore Rotazione (Geodesic)
-                    R_diff = pred_R_np.T @ gt_R
-                    trace = np.trace(R_diff)
-                    cos_angle = np.clip((trace - 1) / 2, -1.0, 1.0)
-                    rot_err = np.degrees(np.arccos(cos_angle))
-                    
-                    print(f"\n OBJECT {obj_id} (Detected as Class {class_id})")
-                    print(f" --------------------------------------------------")
-                    print(f" PREDICTION (RGB-D):")
-                    print(f"   T: [{pred_t_np[0]:.4f}, {pred_t_np[1]:.4f}, {pred_t_np[2]:.4f}] m")
-                    print(f"   Q: [{pred_q_np[0]:.3f}, {pred_q_np[1]:.3f}, {pred_q_np[2]:.3f}, {pred_q_np[3]:.3f}]")
-                    print(f" GROUND TRUTH:")
-                    print(f"   T: [{gt_t[0]:.4f}, {gt_t[1]:.4f}, {gt_t[2]:.4f}] m")
-                    print(f" ERRORS:")
-                    print(f"   Translation: {trans_err:.2f} cm")
-                    print(f"     X: {trans_diff_cm[0]:.2f} cm")
-                    print(f"     Y: {trans_diff_cm[1]:.2f} cm")
-                    print(f"     Z: {trans_diff_cm[2]:.2f} cm (Depth Error)")
-                    print(f"   Rotation:    {rot_err:.2f} deg")
+                # Draw PREDICTION (Arancione)
+                output_img = draw_3d_bbox_colored(output_img, pred_R_np, pred_t_np, cam_k, obj_id, models_info, color=(255, 165, 0))
+                output_img = draw_axis_colored(output_img, pred_R_np, pred_t_np, cam_k, scale=0.05, colors=[(255, 100, 0), (255, 165, 0), (200, 130, 0)])
+                
+                # Print confronto numerico (come baseline)
+                print(f"\n Object {obj_id} (Class {class_id})")
+                print(f"\n GROUND TRUTH:")
+                print(f"     Translation: [{gt_t[0]:7.4f}, {gt_t[1]:7.4f}, {gt_t[2]:7.4f}] m")
+                print(f"     Quaternion:  [{gt_quat[0]:7.4f}, {gt_quat[1]:7.4f}, {gt_quat[2]:7.4f}, {gt_quat[3]:7.4f}]")
+                
+                print(f"\n PREDICTION:")
+                print(f"     Translation: [{pred_t_np[0]:7.4f}, {pred_t_np[1]:7.4f}, {pred_t_np[2]:7.4f}] m")
+                print(f"     Quaternion:  [{pred_q_np[0]:7.4f}, {pred_q_np[1]:7.4f}, {pred_q_np[2]:7.4f}, {pred_q_np[3]:7.4f}]")
+                
+                # Calcola IoU del bounding box
+                gt_bbox = gt_info['obj_bb'] 
+                gt_x1, gt_y1, gt_w, gt_h = gt_bbox
+                gt_x2, gt_y2 = gt_x1 + gt_w, gt_y1 + gt_h
+                
+                # Calcola intersezione
+                x1_inter = max(x_min, gt_x1)
+                y1_inter = max(y_min, gt_y1)
+                x2_inter = min(x_max, gt_x2)
+                y2_inter = min(y_max, gt_y2)
+                
+                if x2_inter > x1_inter and y2_inter > y1_inter:
+                    intersection = (x2_inter - x1_inter) * (y2_inter - y1_inter)
+                else:
+                    intersection = 0
+                
+                # Calcola union
+                pred_area = (x_max - x_min) * (y_max - y_min)
+                gt_area = gt_w * gt_h
+                union = pred_area + gt_area - intersection
+                
+                bbox_iou = intersection / union if union > 0 else 0
+                
+                # Calcola errori pose
+                trans_diff = (pred_t_np - gt_t) * 100 
+                trans_error = np.linalg.norm(trans_diff)
+                R_diff = pred_R_np.T @ gt_R
+                rot_error = np.degrees(np.arccos(np.clip((np.trace(R_diff) - 1) / 2, -1.0, 1.0)))
+                
+                print(f"\n ERRORS:")
+                print(f"     BBox IoU (2D) by YOLO: {bbox_iou:.2%}")
+                print(f"     Translation Error: {trans_error:.2f} cm")
+                print(f"       - X error: {trans_diff[0]:6.2f} cm")
+                print(f"       - Y error: {trans_diff[1]:6.2f} cm")
+                print(f"       - Z error (depth): {trans_diff[2]:6.2f} cm")
+                print(f"     Rotation Error: {rot_error:.2f}°")
 
     # Mostra risultato
     img_final_rgb = cv2.cvtColor(output_img, cv2.COLOR_BGR2RGB)
     plt.figure(figsize=figsize)
     plt.imshow(img_final_rgb)
     plt.axis('off')
-    plt.title("RGB-D Fusion Result: Green=GT, Orange=Pred", fontsize=14)
+    plt.title('Green = Ground Truth | Cyan = Prediction', fontsize=14)
     plt.show()

@@ -15,7 +15,8 @@ class RGBDDatasetPose(CustomDatasetPose):
         Carica immagine depth, la croppa e la normalizza.
         CRITICO: Usa lo stesso bbox (già jitterato se in training) per mantenere allineamento con RGB.
         
-        IMPORTANTE: Usa Image.NEAREST per preservare valori di profondità esatti sui bordi.
+        IMPORTANTE: Usa letterbox padding (come RGB) per preservare aspect ratio dell'oggetto.
+        Resize con NEAREST per preservare valori di profondità esatti.
         """
         # path della depth image 'dataset_root/data/01/depth/0000.png'
         depth_path = self.dataset_root / "data" / f"{folder_id:02d}" / "depth" / f"{sample_id:04d}.png"
@@ -23,8 +24,8 @@ class RGBDDatasetPose(CustomDatasetPose):
         # Carica immagine a 16-bit (valori in millimetri)
         depth_img = Image.open(str(depth_path))
         
-        # Usa BILINEAR anche per la depth per aiutare la CNN
-        square_depth = self._crop_and_pad_image(depth_img, bbox, resample=Image.BILINEAR)
+        # Usa letterbox padding (come RGB) + resize con NEAREST per preservare valori metrici
+        square_depth = self._crop_and_pad_image(depth_img, bbox, resample=Image.NEAREST)
         
         # Conversione in Tensor: da (H, W) a (1, H, W) e in metri
         depth_tensor = torch.tensor(np.array(square_depth), dtype=torch.float32)

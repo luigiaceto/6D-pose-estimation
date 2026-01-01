@@ -206,15 +206,18 @@ def train(
             print(">>> Unfreezing RGB backbone...")
             
         train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device)
+        # Converti rot_loss in gradi (assumendo che sia in radianti)
+        train_rot_deg = np.degrees(train_avg_metrics['rot_loss_avg'])
         print(
             f"  Train Loss: {train_avg_metrics['total_loss_avg']:.4f} "
-            f"(Rot: {train_avg_metrics['rot_loss_avg']:.4f}, Trans: {train_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj: {train_avg_metrics['proj_err_px_avg']:.2f} px)"
+            f"(Rot: {train_rot_deg:.2f}°, Trans: {train_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj: {train_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
 
         val_avg_metrics = validate(model, val_loader, criterion, device)
+        val_rot_deg = np.degrees(val_avg_metrics['rot_loss_avg'])
         print(
             f"  Val Loss: {val_avg_metrics['total_loss_avg']:.4f} "
-            f"(Rot: {val_avg_metrics['rot_loss_avg']:.4f}, Trans: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
+            f"(Rot: {val_rot_deg:.2f}°, Trans: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
         
         scheduler.step(val_avg_metrics['total_loss_avg'])

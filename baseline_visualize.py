@@ -19,7 +19,7 @@ import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
 
 from utils.pose_utils import quaternion_to_rotation_matrix
-from utils.visualization import draw_3d_bbox_colored, draw_axis_colored
+from utils.visualization import draw_3d_bbox_colored, draw_axis_colored 
 
 def visualize_baseline_predictions(
     dataset_root,

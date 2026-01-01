@@ -14,7 +14,7 @@ LINEMOD_OBJECT_NAMES = {
     1: "ape", 2: "benchvise", 4: "camera", 5: "can", 6: "cat",
     8: "driller", 9: "duck", 10: "eggbox", 11: "glue",
     12: "holepuncher", 13: "iron", 14: "lamp", 15: "phone",
-    "ALL": "ALL"
+    "MEAN": "MEAN"
 }
 
 # 2. Traduzione da YOLO (0,1,2...) a LINEMOD (1,2,4...)
@@ -236,9 +236,9 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
 
     df = pd.DataFrame(metrics_per_class)
     
-    # Sort by class_id (keep 'ALL' at the end)
-    df_all = df[df['class_id'] == 'ALL']
-    df_classes = df[df['class_id'] != 'ALL'].sort_values('class_id')
+    # Sort by class_id (keep 'MEAN' at the end)
+    df_all = df[df['class_id'] == 'MEAN']
+    df_classes = df[df['class_id'] != 'MEAN'].sort_values('class_id')
     df = pd.concat([df_classes, df_all], ignore_index=True)
     
     df['Object Name'] = df['class_id'].map(LINEMOD_OBJECT_NAMES)

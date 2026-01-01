@@ -30,7 +30,8 @@ from utils.pose_utils import (
     SYMMETRIC_OBJECTS, 
     )
 
-def evaluate(
+
+def evaluate_baseline(
     dataset_root,
     test_dataset,
     test_loader,
@@ -214,7 +215,7 @@ def evaluate(
     
     per_class_results.append(
         {
-            'class_id': 'ALL',
+            'class_id': 'MEAN',
             'num_samples': len(all_add),
             'accuracy_10p': accuracy,
             'add_r_accuracy_10p': add_r_accuracy,
