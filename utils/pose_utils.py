@@ -126,6 +126,7 @@ def compute_matrix_geodesic_loss(pred_quat, gt_quat):
     
     return torch.mean(sin_half)
 
+
 def compute_add_metric(pred_R, pred_t, gt_R, gt_t, model_points):
     """
     ADD metric: Average Distance of Model Points.
@@ -191,6 +192,7 @@ def compute_add_s_rotation_only(pred_R, gt_R, model_points):
     
     return np.mean(min_distances)
 
+
 def load_model_points(dataset_root, obj_id):
     """Carica corner points 3D del modello."""
     models_info_path = str(dataset_root / "models" / "models_info.yml")
@@ -228,6 +230,7 @@ def compute_rotation_error(pred_R, gt_R):
 def compute_translation_error(pred_t, gt_t):
     """Errore di translation in cm."""
     return np.linalg.norm(pred_t - gt_t) * 100  # m -> cm
+
 
 def print_evaluation_results_table(metrics_per_class, save_table=False, table_path="evaluation_results.csv"):
 
