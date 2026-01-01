@@ -216,16 +216,18 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
     # Mapping nomi
     df['Object Name'] = df['class_id'].apply(lambda x: LINEMOD_OBJECT_NAMES.get(x, str(x)))
     
-    # Riordina e rinomina colonne
+    # Rinomina colonne PRIMA di selezionarle
+    df = df.rename(columns={
+        'num_samples': '#Samples',
+        'accuracy_10p': 'Accuracy @10% (%)',
+        'rot_mean': 'Rotation Error (deg)',
+        'trans_mean': 'Translation Error (cm)',
+        'add_mean': 'ADD (cm)'
+    })
+    
+    # Poi seleziona le colonne rinominate
     df = df[['Object Name', '#Samples', 'Accuracy @10% (%)', 'Rotation Error (deg)', 
-             'Translation Error (cm)', 'ADD (cm)']] \
-         .rename(columns={
-             'num_samples': '#Samples',
-             'accuracy_10p': 'Accuracy @10% (%)',
-             'rot_mean': 'Rotation Error (deg)',
-             'trans_mean': 'Translation Error (cm)',
-             'add_mean': 'ADD (cm)'
-         })
+             'Translation Error (cm)', 'ADD (cm)']]
 
     df = df.round(2)
     

@@ -63,16 +63,16 @@ def draw_axis_colored(img, R, t, K, scale=0.05, colors=None):
     if colors is None:
         colors = [(0, 0, 255), (0, 255, 0), (255, 0, 0)]  # RGB default
     
-    # Scale in metri (0.05 = 5cm)
+    # Scale in metri (0.05 = 5cm), ma convertiamo in mm per coerenza con t
     points_3d = np.array([
         [0, 0, 0],
         [scale, 0, 0],
         [0, scale, 0],
         [0, 0, scale]
-    ], dtype=np.float32)
+    ], dtype=np.float32) * 1000.0  # converti in mm
     
-    # t è già in metri
-    points_cam = (R @ points_3d.T).T + t
+    # t è in metri, convertiamo in mm
+    points_cam = (R @ points_3d.T).T + t * 1000.0
     
     fx, fy, cx, cy = K[0], K[4], K[2], K[5]
     points_2d = []
