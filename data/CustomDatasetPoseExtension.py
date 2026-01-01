@@ -32,6 +32,11 @@ class RGBDDatasetPose(CustomDatasetPose):
 
         # in training applico data augmentation alla depth
         if self.split == 'train':
+            # Random Scale (Moltiplicativo): Simula errori di calibrazione del sensore
+            # Varia la profondità letta del +/- 10%
+            scale_factor = torch.empty(1).uniform_(0.90, 1.10).item() # va bene ???
+            depth_tensor = depth_tensor * scale_factor
+
             noise = torch.randn_like(depth_tensor) * 0.005 # +/- 5mm di rumore
             mask = torch.rand_like(depth_tensor) > 0.10 # 10% dei pixel persi
             depth_tensor = (depth_tensor + noise) * mask
@@ -72,7 +77,11 @@ class RGBDDatasetPose(CustomDatasetPose):
         
         # calcola bbox in fomatio YOLO
         bbox_YOLO = self.compute_yolo_bbox(bbox_base)
+
+        # quanto il crop (bbox) occupa dell'immagine originale
+        bbox_dims = bbox_YOLO[2:4]
         
+        # DA METTERE ANCHE NELLA BASELINE ???
         # bbox center in pixels (per pinhole).
         # CRITICO: Usa bbox_jittered per coerenza geometrica con il crop!
         # Il network vede un'immagine croppata con bbox_jittered, quindi il 
@@ -95,5 +104,6 @@ class RGBDDatasetPose(CustomDatasetPose):
             "quaternion": torch.tensor(quaternion),
             "bbox_base": torch.tensor(bbox_base, dtype=torch.float32),
             "bbox_YOLO": torch.tensor(bbox_YOLO),
+            "bbox_dims": torch.tensor(bbox_dims, dtype=torch.float32),
             "bbox_center_pixel": torch.tensor([cx_pixel, cy_pixel], dtype=torch.float32)
         }

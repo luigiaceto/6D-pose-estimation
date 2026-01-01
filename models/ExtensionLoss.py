@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from utils.pose_utils import compute_matrix_geodesic_loss, compute_quaternion_loss,  SYMMETRIC_OBJECTS
 
+
 class RGBDPoseLoss(nn.Module):
     """
     Loss ottimizzata per RGB-D Pose Estimation (Extension).
@@ -80,8 +81,8 @@ class RGBDPoseLoss(nn.Module):
         
         # --- LOGGING ---
         with torch.no_grad():
-            diff = pred_trans - gt_trans
-            error_cm = torch.norm(diff, p=2, dim=1).mean() * 100
+            # calcolo errore come norma euclidea (magnituto vettore)
+            error_cm = torch.norm(pred_trans - gt_trans, p=2, dim=1).mean() * 100
             error_px = torch.norm(pred_2d - gt_2d, p=2, dim=1).mean()
         
         return {

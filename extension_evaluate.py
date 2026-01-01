@@ -93,15 +93,14 @@ def evaluate(
             rgb = batch['cropped_img'].to(device)
             depth = batch['cropped_depth'].to(device)
             bbox_center = batch['bbox_center_pixel'].to(device)
-            
             gt_translation = batch['translation'].to(device)
             gt_rotation = batch['rotation'].to(device) # Matrice 3x3
-            
             obj_ids = batch['obj_id'].to(device).long().cpu().numpy()
-            
+            bbox_dims = batch['bbox_dims'].to(device, non_blocking=True)
+
             # --- FORWARD PASS ---
             # Il modello ora restituisce direttamente la traslazione finale!
-            pred_quat, pred_translation, _ = model(rgb, depth, bbox_center)
+            pred_quat, pred_translation, _ = model(rgb, depth, bbox_center, bbox_dims)
             
             # Conversione quaternioni -> matrice rotazione
             pred_rotation = quaternion_to_rotation_matrix(pred_quat)

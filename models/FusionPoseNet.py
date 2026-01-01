@@ -57,7 +57,7 @@ class FusionPoseNet(nn.Module):
         
         # ========== Fusione ==========
         # Feature totali dopo la concatenazione
-        fusion_dim = self.rgb_dim + self.depth_dim # 2048 + 512 = 2560
+        fusion_dim = self.rgb_dim + self.depth_dim + 2 # 2048 + 512 + 2 = 2562
         
         # Layer di fusione, comune alle teste finali
         self.fusion_fc = nn.Sequential(
@@ -105,7 +105,7 @@ class FusionPoseNet(nn.Module):
             self.rot_head.bias.fill_(0)
             self.rot_head.bias[0] = 1.0
 
-    def forward(self, rgb, depth, bbox_center_pixel):
+    def forward(self, rgb, depth, bbox_center_pixel, bbox_dims):
         """
         rgb: (B, 3, 224, 224)
         depth: (B, 1, 224, 224)
@@ -118,7 +118,7 @@ class FusionPoseNet(nn.Module):
         
         # --- Fusion ---
         # concatenazione vettori
-        fused = torch.cat([rgb_feat, depth_feat], dim=1)            # (B, 2560)
+        fused = torch.cat([rgb_feat, depth_feat, bbox_dims], dim=1) # (B, 2562)
         fused = self.fusion_fc(fused)                               # (B, 1024)
         
         # --- Prediction Heads ---

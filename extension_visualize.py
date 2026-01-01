@@ -138,6 +138,11 @@ def visualize_fusion_predictions(
             # Clamp coordinate
             x_min, y_min = max(0, x_min), max(0, y_min)
             x_max, y_max = min(img_bgr.shape[1], x_max), min(img_bgr.shape[0], y_max)
+
+            img_h_orig, img_w_orig = img_bgr.shape[:2]
+            w_norm = w / img_w_orig
+            h_norm = h / img_h_orig
+            tensor_bbox_dims = torch.tensor([[w_norm, h_norm]], dtype=torch.float32).to(device)
             
             # --- B. Crop & Preprocess RGB ---
             cropped_pil = img_rgb_pil.crop((x_min, y_min, x_max, y_max))
@@ -169,7 +174,7 @@ def visualize_fusion_predictions(
             # --- E. Inference ---
             with torch.no_grad():
                 # Forward Pass: RGB + Depth + Center -> Quaternion + Translation
-                pred_quat, pred_trans, pred_2d = pose_model(tensor_rgb, tensor_depth, tensor_center)
+                pred_quat, pred_trans, pred_2d = pose_model(tensor_rgb, tensor_depth, tensor_center, tensor_bbox_dims)
             
             # Conversioni per visualizzazione
             pred_t_np = pred_trans[0].cpu().numpy() # [x, y, z] in metri

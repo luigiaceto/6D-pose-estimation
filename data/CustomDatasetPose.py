@@ -39,7 +39,7 @@ class CustomDatasetPose(Dataset):
         if not self.samples:
             raise ValueError(f"No samples found in {str(self.dataset_root)}. Check the dataset path and structure.")
 
-        # Split dataset into [training set 80%] and [test set 20%]
+        # Split dataset into [training set] and [test set]
         labels = [elem[0] for elem in self.samples]
         self.train_samples, self.test_samples = train_test_split(
             self.samples, train_size=self.train_ratio, random_state=self.seed, stratify=labels
@@ -48,7 +48,7 @@ class CustomDatasetPose(Dataset):
         # Select the appropriate split
         if split == "train":
             self.samples = self.train_samples
-        else:  # split == "test"
+        else:
             self.samples = self.test_samples
 
         self.image_mean = torch.tensor([0.485, 0.456, 0.406])
