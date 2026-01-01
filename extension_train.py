@@ -32,12 +32,13 @@ def train_one_epoch(
         bbox_center = batch['bbox_center_pixel'].to(device, non_blocking=True)
         cropped_depth = batch['cropped_depth'].to(device, non_blocking=True)
         obj_id = batch['obj_id'].to(device, non_blocking=True).long()
+        bbox_dims = batch['bbox_dims'].to(device, non_blocking=True)
         
         optimizer.zero_grad(set_to_none=True)
         
         with torch.amp.autocast(device_type='cuda', enabled=True):
             # forward
-            pred_quat, pred_trans, pred_2d = model(cropped_img, cropped_depth, bbox_center)
+            pred_quat, pred_trans, pred_2d = model(cropped_img, cropped_depth, bbox_center, bbox_dims)
                 
             loss_dict = criterion(
                 pred_quat=pred_quat, 
@@ -87,9 +88,10 @@ def validate(model, loader, criterion, device):
             bbox_center = batch['bbox_center_pixel'].to(device, non_blocking=True)
             cropped_depth = batch['cropped_depth'].to(device, non_blocking=True)
             obj_id = batch['obj_id'].to(device, non_blocking=True).long()
+            bbox_dims = batch['bbox_dims'].to(device, non_blocking=True)
 
             with torch.amp.autocast(device_type='cuda', enabled=True):
-                pred_quat, pred_trans, pred_2d = model(cropped_img, cropped_depth, bbox_center)
+                pred_quat, pred_trans, pred_2d = model(cropped_img, cropped_depth, bbox_center, bbox_dims)
                 
                 loss_dict = criterion(
                     pred_quat=pred_quat, 
