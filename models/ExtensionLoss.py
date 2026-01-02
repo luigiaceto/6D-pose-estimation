@@ -72,12 +72,18 @@ class RGBDPoseLoss(nn.Module):
         loss_p = self.proj_loss_fn(pred_2d, gt_2d)
 
         # --- LOSS TOTALE PESATA (Learnable) ---
+        # CORREZIONE: Kendall Loss disabilitata temporaneamente
+        # La rete stava "ignorando" la rotazione aumentando s_rot
+        # Ora forziamo pesi fissi per dare priorità alla rotazione
         # exp(-s) * Loss + s
-        weighted_loss_r = torch.exp(-self.s_rot) * loss_r + self.s_rot
-        weighted_loss_t = torch.exp(-self.s_trans) * loss_t + self.s_trans
-        weighted_loss_p = torch.exp(-self.s_proj) * loss_p + self.s_proj
+        # weighted_loss_r = torch.exp(-self.s_rot) * loss_r + self.s_rot
+        # weighted_loss_t = torch.exp(-self.s_trans) * loss_t + self.s_trans
+        # weighted_loss_p = torch.exp(-self.s_proj) * loss_p + self.s_proj
+        # total_loss = weighted_loss_r + weighted_loss_t + weighted_loss_p
         
-        total_loss = weighted_loss_r + weighted_loss_t + weighted_loss_p
+        # PESI FISSI: Forza la rete a minimizzare la rotazione (peso 10x)
+        # loss_r è in radianti (0-3.14), loss_t è in metri (SmoothL1), loss_p è in pixel
+        total_loss = 10.0 * loss_r + 20.0 * loss_t + 1.0 * loss_p
         
         # --- LOGGING ---
         with torch.no_grad():
