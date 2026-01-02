@@ -173,5 +173,3 @@ def evaluate_extension(
 
     # Stampa e Salva CSV
     return print_evaluation_results_table(per_class_results, save_table, table_path)
-
-

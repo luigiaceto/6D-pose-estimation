@@ -7,8 +7,6 @@ from data.CustomDatasetPose import CustomDatasetPose
 class RGBDDatasetPose(CustomDatasetPose):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Trasformazione specifica per depth: Normalizzazione semplice
-        # Non usiamo ImageNet mean/std per la depth perchè non ha senso fisico qui
     
     def load_cropped_depth(self, folder_id, sample_id, bbox):
         """
@@ -33,11 +31,6 @@ class RGBDDatasetPose(CustomDatasetPose):
 
         # in training applico data augmentation alla depth
         if self.split == 'train':
-            # Random Scale (Moltiplicativo): Simula errori di calibrazione del sensore
-            # Varia la profondità letta del +/- 10%
-            scale_factor = torch.empty(1).uniform_(0.90, 1.10).item() # va bene ???
-            depth_tensor = depth_tensor * scale_factor
-
             noise = torch.randn_like(depth_tensor) * 0.005 # +/- 5mm di rumore
             mask = torch.rand_like(depth_tensor) > 0.10 # 10% dei pixel persi
             depth_tensor = (depth_tensor + noise) * mask

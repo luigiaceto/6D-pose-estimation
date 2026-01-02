@@ -186,7 +186,7 @@ def train(
         factor=0.5,
         patience=10,
         min_lr=1e-7,
-        # verbose=True #per colab disabilitare
+        # verbose=True # disabilitare per colab
     )
 
     scaler = torch.amp.GradScaler('cuda', enabled=True)

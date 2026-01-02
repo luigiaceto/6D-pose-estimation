@@ -13,18 +13,26 @@ class DepthEncoder(nn.Module):
     def __init__(self, feature_dim=512):
         super().__init__()
         self.conv = nn.Sequential(
+
+            nn.BatchNorm2d(1),
+
             nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3),               # -> 112x112
+            nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1),                   # -> 56x56
             
             nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),             # -> 28x28
+            nn.BatchNorm2d(128),
             nn.ReLU(),
             
             nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1),            # -> 14x14
+            nn.BatchNorm2d(256),
             nn.ReLU(),
             
             nn.Conv2d(256, feature_dim, kernel_size=3, stride=2, padding=1),    # -> 7x7
+            nn.BatchNorm2d(feature_dim),
             nn.ReLU(),
+
             nn.AdaptiveAvgPool2d((1, 1))                                        # -> 1x1
         )
         
@@ -62,7 +70,7 @@ class FusionPoseNet(nn.Module):
         # Layer di fusione, comune alle teste finali
         self.fusion_fc = nn.Sequential(
             nn.Linear(fusion_dim, 1024),
-            nn.LayerNorm(1024), # meglio rispetto la batchnorm nell'MLP
+            nn.LayerNorm(1024), # nel layer di fusione è meglio rispetto la BatchNorm
             nn.ReLU(),
             nn.Dropout(0.5)
         )
@@ -101,6 +109,8 @@ class FusionPoseNet(nn.Module):
         
         # Per la rotazione, inizializzazione specifica
         nn.init.xavier_uniform_(self.rot_head.weight, gain=0.01)
+        nn.init.constant_(self.z_head[2].bias, -0.35) # inizializzo a distanza circa 70cm ???
+
         with torch.no_grad():
             self.rot_head.bias.fill_(0)
             self.rot_head.bias[0] = 1.0
@@ -157,8 +167,9 @@ class FusionPoseNet(nn.Module):
         """Unfreezes RGB backbone.
         
         Args:
-            partial: If True, unfreezes only layer4 (last residual block).
-                    If False, unfreezes all layers.
+            partial:
+                - If True, unfreezes only layer4 (last residual block).
+                - If False, unfreezes all layers.
         """
         if partial:
             # Sblocca solo layer4 (indice 7 nella Sequential)

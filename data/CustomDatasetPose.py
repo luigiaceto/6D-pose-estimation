@@ -115,6 +115,7 @@ class CustomDatasetPose(Dataset):
                 folder_names.append(folder_id)
                 sample_ids = sorted([int(f.split('.')[0]) for f in os.listdir(folder_path) if f.endswith('.png')])
                 samples.extend([(folder_id, sid) for sid in sample_ids])  # store (folder_id, sample_id)
+
         return samples, folder_names
     
     def get_image_mean_std(self):
@@ -186,7 +187,7 @@ class CustomDatasetPose(Dataset):
         y_center = y_min + height / 2
 
         # Gestione bbox parzialmente fuori dall'immagine
-        # Se il centro è fuori, lo clippiamo E aggiustiamo width/height di conseguenza
+        # Se il centro è fuori, lo clippiamo e aggiustiamo width/height di conseguenza
         if x_center < 0:
             width += 2 * x_center  # x_center è negativo, sottraiamo
             x_center = 0
@@ -275,10 +276,11 @@ class CustomDatasetPose(Dataset):
         
         Args:
             img: PIL Image
-            bbox: (x, y, w, h) - può essere già jitterato o no
+            bbox: (x, y, w, h)
+                    - può essere già jitterato o no
             resample: Metodo di resampling per resize (default: BILINEAR)
-                     - Image.BILINEAR: Per RGB (smooth interpolation)
-                     - Image.NEAREST: Per Depth (preserva valori esatti)
+                    - Image.BILINEAR: Per RGB (smooth interpolation)
+                    - Image.NEAREST: Per Depth (preserva valori esatti)
         
         Returns:
             PIL Image preprocessata (224, 224)
@@ -338,11 +340,11 @@ class CustomDatasetPose(Dataset):
         """
         pose = self.ground_truths[folder_id][sample_id]
         
-        translation = np.array(pose['cam_t_m2c'], dtype=np.float32)/1000.0  # [3] ---> (x,y,z) IN METRI
-        rotation = np.array(pose['cam_R_m2c'], dtype=np.float32).reshape(3, 3)  # [3x3] ---> rotation matrix
-        quaternion = np.array(pose['quaternion'], dtype=np.float32)  # [4] ---> quaternion
-        bbox_base = np.array(pose['obj_bb'], dtype=np.float32) # [4] ---> x_min, y_min, width, height
-        obj_id = np.array(pose['obj_id'], dtype=np.float32) # [1] ---> label
+        translation = np.array(pose['cam_t_m2c'], dtype=np.float32)/1000.0      # (x,y,z) in metri ---> dim 3
+        rotation = np.array(pose['cam_R_m2c'], dtype=np.float32).reshape(3, 3)  # rotation matrix ---> dim 3x3
+        quaternion = np.array(pose['quaternion'], dtype=np.float32)             # quaternion ---> dim 4
+        bbox_base = np.array(pose['obj_bb'], dtype=np.float32)                  # x_min, y_min, width, height ---> dim 4
+        obj_id = np.array(pose['obj_id'], dtype=np.float32)                     # label ---> dim 1
         
         cropped_img = self.load_cropped_image(str(self.dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png"), bbox_base)
 
@@ -361,7 +363,7 @@ class CustomDatasetPose(Dataset):
         """
         Load a dataset sample.
         """
-        folder_id, sample_id = self.samples[idx] # both are integer
+        folder_id, sample_id = self.samples[idx]
 
         img_path = str(self.dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png")
 
