@@ -21,6 +21,7 @@ def train_one_epoch(
     
     total_loss_sum = 0
     rotation_loss_sum = 0
+    rotation_error_deg_sum = 0  # Errore angolare reale in gradi
     translation_error_cm_sum = 0
     proj_err_px_sum = 0
     
@@ -58,15 +59,24 @@ def train_one_epoch(
         scaler.step(optimizer)
         scaler.update()
         
+        # Calcolo errore angolare reale (geodesico)
+        with torch.no_grad():
+            dot_prod = torch.abs(torch.sum(pred_quat * gt_quaternion, dim=1))
+            dot_prod = torch.clamp(dot_prod, -1.0, 1.0)
+            angular_dist_rad = 2 * torch.acos(dot_prod)
+            angular_dist_deg = torch.rad2deg(angular_dist_rad).mean().item()
+        
         # logging
         total_loss_sum += loss.item()
         rotation_loss_sum += loss_dict['rot_loss'].item()
+        rotation_error_deg_sum += angular_dist_deg
         translation_error_cm_sum += loss_dict['trans_err_cm'].item()
         proj_err_px_sum += loss_dict['proj_err_px'].item()
     
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
         'rot_loss_avg': rotation_loss_sum / len(loader),
+        'rot_error_deg_avg': rotation_error_deg_sum / len(loader),  # Errore reale in gradi
         'trans_err_cm_avg': translation_error_cm_sum / len(loader),
         'proj_err_px_avg': proj_err_px_sum / len(loader)
     }
@@ -78,6 +88,7 @@ def validate(model, loader, criterion, device):
     
     total_loss_sum = 0
     rotation_loss_sum = 0
+    rotation_error_deg_sum = 0  # Errore angolare reale in gradi
     translation_error_cm_sum = 0
     proj_err_px_sum = 0
     
@@ -102,15 +113,23 @@ def validate(model, loader, criterion, device):
                     pred_2d=pred_2d,
                     class_ids=obj_id 
                 )
+                
+                # Calcolo errore angolare reale (geodesico)
+                dot_prod = torch.abs(torch.sum(pred_quat * gt_quaternion, dim=1))
+                dot_prod = torch.clamp(dot_prod, -1.0, 1.0)
+                angular_dist_rad = 2 * torch.acos(dot_prod)
+                angular_dist_deg = torch.rad2deg(angular_dist_rad).mean().item()
             
             total_loss_sum += loss_dict['total_loss'].item()
             rotation_loss_sum += loss_dict['rot_loss'].item()
+            rotation_error_deg_sum += angular_dist_deg
             translation_error_cm_sum += loss_dict['trans_err_cm'].item()
             proj_err_px_sum += loss_dict['proj_err_px'].item()
 
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
         'rot_loss_avg': rotation_loss_sum / len(loader),
+        'rot_error_deg_avg': rotation_error_deg_sum / len(loader),  # Errore reale in gradi
         'trans_err_cm_avg': translation_error_cm_sum / len(loader),
         'proj_err_px_avg': proj_err_px_sum / len(loader)
     }
@@ -213,18 +232,15 @@ def train(
                 print(">>> Unfreezing RGB backbone (All layers)...")
             
         train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device)
-        # Converti rot_loss in gradi (assumendo che sia in radianti)
-        train_rot_deg = np.degrees(train_avg_metrics['rot_loss_avg'])
         print(
             f"  Train Loss: {train_avg_metrics['total_loss_avg']:.4f} "
-            f"(Rot: {train_rot_deg:.2f}°, Trans: {train_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj: {train_avg_metrics['proj_err_px_avg']:.2f} px)"
+            f"(Rot: {train_avg_metrics['rot_error_deg_avg']:.2f}°, Trans: {train_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj: {train_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
 
         val_avg_metrics = validate(model, val_loader, criterion, device)
-        val_rot_deg = np.degrees(val_avg_metrics['rot_loss_avg'])
         print(
             f"  Val Loss: {val_avg_metrics['total_loss_avg']:.4f} "
-            f"(Rot: {val_rot_deg:.2f}°, Trans: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
+            f"(Rot: {val_avg_metrics['rot_error_deg_avg']:.2f}°, Trans: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
         
         scheduler.step(val_avg_metrics['total_loss_avg'])
