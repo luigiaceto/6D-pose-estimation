@@ -31,6 +31,10 @@ class RGBDDatasetPose(CustomDatasetPose):
 
         # in training applico data augmentation alla depth
         if self.split == 'train':
+            # Simula errori di calibrazione minimi e previene overfitting sui valori esatti
+            scale_factor = torch.empty(1).uniform_(0.99, 1.01).item()
+            depth_tensor = depth_tensor * scale_factor
+
             noise = torch.randn_like(depth_tensor) * 0.005 # +/- 5mm di rumore
             mask = torch.rand_like(depth_tensor) > 0.10 # 10% dei pixel persi
             depth_tensor = (depth_tensor + noise) * mask
