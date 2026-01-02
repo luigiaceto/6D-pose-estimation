@@ -2,6 +2,7 @@ from pathlib import Path
 import torch
 import torch.optim as optim
 from tqdm import tqdm
+import numpy as np
 
 from models.FusionPoseNet import FusionPoseNet
 from models.ExtensionLoss import RGBDPoseLoss
@@ -127,6 +128,7 @@ def train(
     weight_decay=1e-5,
     device='cuda',
     freeze_rgb_epochs=5,
+    partial_unfreeze=False,
     resume_from_checkpoint=None
 ):
     model = FusionPoseNet(
@@ -204,8 +206,11 @@ def train(
         print(f"LR Backbone RGB: {lr_backbone:.2e} | LR Heads: {lr_head:.2e}")
 
         if epoch == freeze_rgb_epochs:
-            model.unfreeze_rgb()
-            print(">>> Unfreezing RGB backbone...")
+            model.unfreeze_rgb(partial=partial_unfreeze)
+            if partial_unfreeze:
+                print(">>> Unfreezing RGB backbone (Layer 4 only)...")
+            else:
+                print(">>> Unfreezing RGB backbone (All layers)...")
             
         train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device)
         # Converti rot_loss in gradi (assumendo che sia in radianti)

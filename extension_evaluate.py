@@ -16,7 +16,6 @@ from utils.pose_utils import (
     compute_translation_error,
     load_model_points, 
     print_evaluation_results_table,
-    SYMMETRIC_OBJECTS, 
     )
 
 
@@ -160,7 +159,7 @@ def evaluate_extension(
             'add_rot_only_mean': metrics_df['add_rotation_only'].mean()
         })
         
-    # Aggiungi riga "ALL" (Media globale)
+    # Aggiungi riga "MEAN" (Media globale)
     per_class_results.append({
         'class_id': 'MEAN',
         'num_samples': len(all_add),

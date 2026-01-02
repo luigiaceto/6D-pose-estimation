@@ -64,7 +64,7 @@ class FusionPoseNet(nn.Module):
             nn.Linear(fusion_dim, 1024),
             nn.LayerNorm(1024), # meglio rispetto la batchnorm nell'MLP
             nn.ReLU(),
-            nn.Dropout(0.3)
+            nn.Dropout(0.5)
         )
         
         # ========== 3 teste finali ========== idee nomi modello: ChimeraPose, TridentNet, HydraPose, Hecate6D, DeltaPose, Fusio3, CerberusNet
@@ -153,6 +153,18 @@ class FusionPoseNet(nn.Module):
         for param in self.rgb_backbone.parameters():
             param.requires_grad = False
             
-    def unfreeze_rgb(self):
-        for param in self.rgb_backbone.parameters():
-            param.requires_grad = True
+    def unfreeze_rgb(self, partial=False):
+        """Unfreezes RGB backbone.
+        
+        Args:
+            partial: If True, unfreezes only layer4 (last residual block).
+                    If False, unfreezes all layers.
+        """
+        if partial:
+            # Sblocca solo layer4 (indice 7 nella Sequential)
+            # ResNet structure: conv1, bn1, relu, maxpool, layer1, layer2, layer3, layer4, avgpool
+            for param in self.rgb_backbone[7].parameters():
+                param.requires_grad = True
+        else:
+            for param in self.rgb_backbone.parameters():
+                param.requires_grad = True
