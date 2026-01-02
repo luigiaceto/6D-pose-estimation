@@ -7,8 +7,6 @@ from data.CustomDatasetPose import CustomDatasetPose
 class RGBDDatasetPose(CustomDatasetPose):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Trasformazione specifica per depth: Normalizzazione semplice
-        # Non usiamo ImageNet mean/std per la depth perchè non ha senso fisico qui
     
     def load_cropped_depth(self, folder_id, sample_id, bbox):
         """
