@@ -171,11 +171,13 @@ class FusionPoseNet(nn.Module):
                 - If True, unfreezes only layer4 (last residual block).
                 - If False, unfreezes all layers.
         """
+
+        # ResNet structure: conv1, bn1, relu, maxpool, layer1, layer2, layer3, layer4, avgpool
         if partial:
-            # Sblocca solo layer4 (indice 7 nella Sequential)
-            # ResNet structure: conv1, bn1, relu, maxpool, layer1, layer2, layer3, layer4, avgpool
-            for param in self.rgb_backbone[7].parameters():
+            # Sblocca solo layer4 (ultimo blocco convoluzionale)
+            for param in self.rgb_backbone[-2].parameters():
                 param.requires_grad = True
         else:
+            # Sblocca tutta la ResNet
             for param in self.rgb_backbone.parameters():
                 param.requires_grad = True

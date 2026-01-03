@@ -213,7 +213,6 @@ def train(
     
     print("Mixed Precision (AMP): ENABLED")
 
-    # Freeze iniziale RGB (Transfer Learning)
     model.freeze_rgb()
     
     for epoch in range(start_epoch, epochs):
@@ -226,8 +225,10 @@ def train(
 
         if epoch == freeze_rgb_epochs:
             model.unfreeze_rgb(partial=partial_unfreeze)
+
+            optimizer.param_groups[0]['lr'] = lr_rgb_backbone # altrimenti viene dimezzato il learning rate della ResNet, nonostante non sia mai stato usato
             if partial_unfreeze:
-                print(">>> Unfreezing RGB backbone (Layer 4 only)...")
+                print(">>> Unfreezing RGB backbone (Last conv layer only)...")
             else:
                 print(">>> Unfreezing RGB backbone (All layers)...")
             
