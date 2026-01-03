@@ -77,8 +77,18 @@ class RGBDPoseLoss(nn.Module):
         weighted_loss_r = torch.exp(-self.s_rot) * loss_r + self.s_rot
         weighted_loss_t = torch.exp(-self.s_trans) * loss_t + self.s_trans
         weighted_loss_p = torch.exp(-self.s_proj) * loss_p + self.s_proj
-        
+
         total_loss = weighted_loss_r + weighted_loss_t + weighted_loss_p
+
+        # ALTERNATIVA: loss con pesi fissati
+        # Rotazione (range 0-1): Peso neutro
+        #w_rot = 2.0   
+        # Traslazione (range 0.001 - 0.1): Peso ENORME
+        # Dobbiamo portare quel 0.005 a valere quanto la rotazione/proiezione
+        #w_trans = 100.0  
+        # Proiezione (range 10 - 100): Peso PICCOLO
+        # Dobbiamo ridurre quei 25.0 per non farli dominare
+        #w_proj = 0.1
         
         # --- LOGGING ---
         with torch.no_grad():
