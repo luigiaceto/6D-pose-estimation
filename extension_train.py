@@ -25,7 +25,7 @@ def train_one_epoch(
     translation_error_cm_sum = 0
     proj_err_px_sum = 0
     
-    pbar = tqdm(loader, desc="**Training**")
+    pbar = tqdm(loader, desc="** Training **")
     for batch in pbar:
         # Sposta dati su GPU
         cropped_img = batch['cropped_img'].to(device, non_blocking=True)
@@ -93,7 +93,7 @@ def validate(model, loader, criterion, device):
     proj_err_px_sum = 0
     
     with torch.no_grad():
-        for batch in tqdm(loader, desc="**Validation**"):
+        for batch in tqdm(loader, desc="** Validation **"):
             cropped_img = batch['cropped_img'].to(device, non_blocking=True)
             gt_quaternion = batch['quaternion'].to(device, non_blocking=True)
             gt_translation = batch['translation'].to(device, non_blocking=True)
@@ -172,7 +172,7 @@ def train(
         {'params': model.offset_head.parameters(), 'lr': lr_new_components}, # Testa per Offset (pixel)
 
         # Gruppo 4: Parametri Learnable della Loss (s_rot, s_trans, s_proj)
-        {'params': criterion.parameters(), 'lr': lr_new_components}
+        {'params': criterion.parameters(), 'lr': 1e-4}
     ]
 
     optimizer = optim.AdamW(
@@ -185,8 +185,15 @@ def train(
         mode='min',
         factor=0.5,
         patience=10,
-        min_lr=1e-7,
-        # verbose=True # disabilitare per colab
+        min_lr=[
+            1e-8,  # RGB Backbone (deve poter scendere molto)
+            1e-7,  # Depth Backbone
+            1e-7,  # Fusion FC
+            1e-7,  # Rot Head
+            1e-7,  # Z Head
+            1e-7,  # Offset Head
+            1e-7   # Loss Parameters
+        ]
     )
 
     scaler = torch.amp.GradScaler('cuda', enabled=True)
@@ -209,7 +216,7 @@ def train(
         start_epoch = checkpoint['epoch']
         best_loss = checkpoint['best_loss']
         
-        print(f"Resumed from epoch {start_epoch} with best loss {best_loss:.4f}")
+        print(f"📍 Resumed from epoch {start_epoch} with best loss {best_loss:.4f}")
     
     print("Mixed Precision (AMP): ENABLED")
 
@@ -228,22 +235,37 @@ def train(
 
             optimizer.param_groups[0]['lr'] = lr_rgb_backbone # altrimenti viene dimezzato il learning rate della ResNet, nonostante non sia mai stato usato
             if partial_unfreeze:
-                print(">>> Unfreezing RGB backbone (Last conv layer only)...")
+                print("🔥 Unfreezing RGB backbone (Last conv layer only)...")
             else:
-                print(">>> Unfreezing RGB backbone (All layers)...")
+                print("🔥 Unfreezing RGB backbone (All layers)...")
             
         train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device)
         print(
             f"  Train Loss: {train_avg_metrics['total_loss_avg']:.4f} "
-            f"(Rot: {train_avg_metrics['rot_error_deg_avg']:.2f}°, Trans: {train_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj: {train_avg_metrics['proj_err_px_avg']:.2f} px)"
+            f"(Rot Err: {train_avg_metrics['rot_error_deg_avg']:.2f}°, Trans Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {train_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
 
         val_avg_metrics = validate(model, val_loader, criterion, device)
         print(
             f"  Val Loss: {val_avg_metrics['total_loss_avg']:.4f} "
-            f"(Rot: {val_avg_metrics['rot_error_deg_avg']:.2f}°, Trans: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
+            f"(Rot Err: {val_avg_metrics['rot_error_deg_avg']:.2f}°, Trans Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
         
+        with torch.no_grad():
+            # Recupera i valori grezzi 's' (che l'optimizer modifica)
+            s_r = criterion.s_rot.item()
+            s_t = criterion.s_trans.item()
+            s_p = criterion.s_proj.item()
+
+            # Calcola i pesi REALI applicati alla loss: W = e^(-s)
+            w_r = torch.exp(-criterion.s_rot).item()
+            w_t = torch.exp(-criterion.s_trans).item()
+            w_p = torch.exp(-criterion.s_proj).item()
+
+        print(f"  [Auto-Weights] Rot: {w_r:.4f} (s={s_r:.2f}) | "
+              f"Trans: {w_t:.4f} (s={s_t:.2f}) | "
+              f"Proj: {w_p:.4f} (s={s_p:.2f})")
+
         scheduler.step(val_avg_metrics['total_loss_avg'])
 
         if val_avg_metrics['total_loss_avg'] < best_loss:
@@ -260,7 +282,7 @@ def train(
             
             save_path = str(Path(checkpoint_dir) / "best_fusion_model.pt")
             torch.save(checkpoint_dict, save_path)
-            print(f"✓ Checkpoint salvato: {save_path} (Loss: {best_loss:.4f})")
+            print(f"✅ Checkpoint salvato: {save_path} (Loss: {best_loss:.4f})")
         print()
     
     print("\nTraining completed!")

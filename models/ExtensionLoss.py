@@ -29,9 +29,9 @@ class RGBDPoseLoss(nn.Module):
         # --- PARAMETRI LEARNABLE (Kendall's Multi-Task Loss) ---
         # Eventualmente inizializzare a valori negativi (es. -2.0) per dare
         # un peso iniziale alto
-        self.s_rot = nn.Parameter(torch.tensor(0.0), requires_grad=True)
-        self.s_trans = nn.Parameter(torch.tensor(0.0), requires_grad=True)
-        self.s_proj = nn.Parameter(torch.tensor(0.0), requires_grad=True)
+        self.s_rot = nn.Parameter(torch.tensor(0.0), requires_grad=True) # peso iniziale ~1.0
+        self.s_trans = nn.Parameter(torch.tensor(-4.6), requires_grad=True) # peso iniziale ~100.0
+        self.s_proj = nn.Parameter(torch.tensor(2.3), requires_grad=True) # peso iniziale ~0.1
 
 
     def forward(self, pred_quat, pred_trans, gt_quat, gt_trans, pred_2d, class_ids=None):

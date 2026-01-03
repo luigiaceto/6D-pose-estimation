@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import torchvision.models as models
 from models.PinholeCamera import PinholeCamera
 
+
 class DepthEncoder(nn.Module):
     """
     CNN semplice per estrarre features dalla depth map (1 canale).
