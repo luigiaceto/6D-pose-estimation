@@ -23,7 +23,9 @@ class RGBDPoseLoss(nn.Module):
         )
         
         # Loss per traslazione e proiezione
-        self.trans_loss_fn = nn.SmoothL1Loss(beta=1.0) # Robusta agli outlier
+        # MODIFICA: L1Loss invece di SmoothL1 per mantenere gradienti lineari
+        # SmoothL1 diventa quadratica per valori piccoli (<1m) e causa gradienti troppo deboli
+        self.trans_loss_fn = nn.L1Loss() # Gradienti lineari e stabili
         self.proj_loss_fn = nn.MSELoss()
 
         # --- PARAMETRI LEARNABLE (Kendall's Multi-Task Loss) ---
@@ -82,9 +84,11 @@ class RGBDPoseLoss(nn.Module):
         # weighted_loss_p = torch.exp(-self.s_proj) * loss_p + self.s_proj
         # total_loss = weighted_loss_r + weighted_loss_t + weighted_loss_p
         
-        # PESI FISSI: Forza la rete a minimizzare la rotazione (peso 10x)
-        # loss_r è in radianti (0-3.14), loss_t è in metri (SmoothL1), loss_p è in pixel
-        total_loss = 10.0 * loss_r + 20.0 * loss_t + 1.0 * loss_p
+        # PESI FISSI BILANCIATI:
+        # loss_r (valore ~0.25) * 10.0 = ~2.5
+        # loss_t (valore ~0.05m con L1Loss) * 5.0 = ~0.25
+        # Rotazione ha priorità (10x) ma translation non causa overfitting (5.0 invece di 20.0)
+        total_loss = 10.0 * loss_r + 5.0 * loss_t + 1.0 * loss_p
         
         # --- LOGGING ---
         with torch.no_grad():

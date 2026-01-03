@@ -83,6 +83,7 @@ class FusionPoseNet(nn.Module):
         self.z_head = nn.Sequential(
             nn.Linear(1024, 128),
             nn.ReLU(),
+            nn.Dropout(0.2),
             nn.Linear(128, 1) # Output: Z (metri)
         )
 
@@ -93,6 +94,7 @@ class FusionPoseNet(nn.Module):
         self.offset_head = nn.Sequential(
             nn.Linear(1024, 128),
             nn.ReLU(),
+            nn.Dropout(0.2),
             nn.Linear(128, 2) # Output: δu, δv (correzioni a u e v ottenuti dal BBOX)
         )
 
@@ -109,7 +111,7 @@ class FusionPoseNet(nn.Module):
         
         # Per la rotazione, inizializzazione specifica
         nn.init.xavier_uniform_(self.rot_head.weight, gain=0.01)
-        nn.init.constant_(self.z_head[2].bias, -0.35) # inizializzo a distanza circa 70cm ???
+        nn.init.constant_(self.z_head[3].bias, -0.35) # inizializzo a distanza circa 70cm ???
 
         with torch.no_grad():
             self.rot_head.bias.fill_(0)
