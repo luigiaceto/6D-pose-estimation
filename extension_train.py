@@ -224,12 +224,17 @@ def train(
         
         print(f"LR Backbone RGB: {lr_backbone:.2e} | LR Heads: {lr_head:.2e}")
 
-        if epoch == freeze_rgb_epochs:
+        if epoch < freeze_rgb_epochs:
+            model.freeze_rgb()
+        elif epoch == freeze_rgb_epochs:
+            # È il momento dello sblocco!
             model.unfreeze_rgb(partial=partial_unfreeze)
-            if partial_unfreeze:
-                print(">>> Unfreezing RGB backbone (Layer 4 only)...")
-            else:
-                print(">>> Unfreezing RGB backbone (All layers)...")
+            
+            # --- FIX CRITICO: RESET LEARNING RATE BACKBONE ---
+            # Forziamo il LR della backbone al valore iniziale (1e-6), ignorando 
+            # eventuali tagli fatti dallo scheduler durante il freeze.
+            optimizer.param_groups[0]['lr'] = lr_rgb_backbone
+            print(f">>> 🔓 UNFREEZE COMPLETO: Backbone LR resettato a {lr_rgb_backbone:.2e}")
             
         train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device)
         print(
