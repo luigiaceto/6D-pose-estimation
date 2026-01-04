@@ -242,13 +242,13 @@ def train(
         train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device)
         print(
             f"  Train Loss: {train_avg_metrics['total_loss_avg']:.4f}, ADD Loss: {train_avg_metrics['add_loss_avg']}, Proj Loss: {train_avg_metrics['proj_loss_avg']}"
-            f"(Rot Err: {train_avg_metrics['rot_error_deg_avg']:.2f}°, Trans Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {train_avg_metrics['proj_err_px_avg']:.2f} px)"
+            f"(Rot Err: {train_avg_metrics['rot_err_deg_avg']:.2f}°, Trans Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {train_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
 
         val_avg_metrics = validate(model, val_loader, criterion, device)
         print(
             f"  Train Loss: {val_avg_metrics['total_loss_avg']:.4f}, ADD Loss: {val_avg_metrics['add_loss_avg']}, Proj Loss: {val_avg_metrics['proj_loss_avg']}"
-            f"(Rot Err: {val_avg_metrics['rot_error_deg_avg']:.2f}°, Trans Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
+            f"(Rot Err: {val_avg_metrics['rot_err_deg_avg']:.2f}°, Trans Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
 
         scheduler.step(val_avg_metrics['total_loss_avg'])
