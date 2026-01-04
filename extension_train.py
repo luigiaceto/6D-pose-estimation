@@ -183,19 +183,21 @@ def train(
         weight_decay=weight_decay
     )
     
+    # IMPORTANTE SETTARLO BENE
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, 
         mode='min',
-        factor=0.5,
-        patience=10,
+        factor=0.1,     # quando si attiva new_lr = lr * 0.1
+        patience=10,    # se per X epoche non viene battuta la loss migliore, si attiva
         min_lr=[
-            1e-8,   # RGB Backbone (deve poter scendere molto)
-            1e-7,   # Depth Backbone
-            1e-7,   # Fusion FC
-            1e-7,   # Rot Head
-            1e-7,   # Z Head
-            1e-7    # Offset Head
-        ]
+            1e-8,       # RGB Backbone (deve poter scendere molto)
+            1e-7,       # Depth Backbone
+            1e-7,       # Fusion FC
+            1e-7,       # Rot Head
+            1e-7,       # Z Head
+            1e-7        # Offset Head
+        ],
+        verbose=True
     )
 
     scaler = torch.amp.GradScaler('cuda', enabled=True)
@@ -215,14 +217,15 @@ def train(
         if 'scaler_state_dict' in checkpoint:
             scaler.load_state_dict(checkpoint['scaler_state_dict'])
         
-        start_epoch = checkpoint['epoch']
+        epoch = checkpoint['epoch']
         best_loss = checkpoint['best_loss']
         
-        print(f"📍 Resumed from epoch {start_epoch} with best loss {best_loss:.4f}")
+        print(f"📍 Resumed from epoch {epoch} with best loss {best_loss:.4f}")
     
     print("Mixed Precision (AMP): ENABLED")
 
     model.freeze_rgb()
+    already_unfreezed = False # serve per evitare inconsistenze durante l'unfreezing partendo da un checkpoint
     
     for epoch in range(start_epoch, epochs):
         print(f"\nEpoch {epoch+1}/{epochs}")
@@ -232,7 +235,7 @@ def train(
         
         print(f"LR Backbone RGB: {lr_backbone:.2e} | LR Heads: {lr_head:.2e}")
 
-        if epoch == freeze_rgb_epochs:
+        if epoch >= freeze_rgb_epochs and already_unfreezed == False:
             model.unfreeze_rgb(partial=partial_unfreeze)
 
             optimizer.param_groups[0]['lr'] = lr_rgb_backbone # altrimenti viene dimezzato il learning rate della ResNet, nonostante non sia mai stato usato
