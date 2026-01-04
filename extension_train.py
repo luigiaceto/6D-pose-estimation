@@ -172,7 +172,7 @@ def train(
         {'params': model.offset_head.parameters(), 'lr': lr_new_components}, # Testa per Offset (pixel)
 
         # Gruppo 4: Parametri Learnable della Loss (s_rot, s_trans, s_proj)
-        {'params': criterion.parameters(), 'lr': 1e-4}
+        #{'params': criterion.parameters(), 'lr': 1e-4}
     ]
 
     optimizer = optim.AdamW(
@@ -192,7 +192,7 @@ def train(
             1e-7,  # Rot Head
             1e-7,  # Z Head
             1e-7,  # Offset Head
-            1e-7   # Loss Parameters
+            #1e-7   # Loss Weights
         ]
     )
 
@@ -251,20 +251,18 @@ def train(
             f"(Rot Err: {val_avg_metrics['rot_error_deg_avg']:.2f}°, Trans Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
         
-        with torch.no_grad():
+        #with torch.no_grad():
             # Recupera i valori grezzi 's' (che l'optimizer modifica)
-            s_r = criterion.s_rot.item()
-            s_t = criterion.s_trans.item()
-            s_p = criterion.s_proj.item()
+        #    s_r = criterion.s_rot.item()
+        #    s_t = criterion.s_trans.item()
+        #    s_p = criterion.s_proj.item()
 
             # Calcola i pesi REALI applicati alla loss: W = e^(-s)
-            w_r = torch.exp(-criterion.s_rot).item()
-            w_t = torch.exp(-criterion.s_trans).item()
-            w_p = torch.exp(-criterion.s_proj).item()
+        #    w_r = torch.exp(-criterion.s_rot).item()
+        #    w_t = torch.exp(-criterion.s_trans).item()
+        #    w_p = torch.exp(-criterion.s_proj).item()
 
-        print(f"  [Auto-Weights] Rot: {w_r:.4f} (s={s_r:.2f}) | "
-              f"Trans: {w_t:.4f} (s={s_t:.2f}) | "
-              f"Proj: {w_p:.4f} (s={s_p:.2f})")
+        #print(f"  [Auto-Weights] Rot: {w_r:.4f} (s={s_r:.2f}) | Trans: {w_t:.4f} (s={s_t:.2f}) | Proj: {w_p:.4f} (s={s_p:.2f})")
 
         scheduler.step(val_avg_metrics['total_loss_avg'])
 
