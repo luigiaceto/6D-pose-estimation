@@ -148,7 +148,8 @@ def train(
     device='cuda',
     freeze_rgb_epochs=5,
     partial_unfreeze=False,
-    resume_from_checkpoint=None
+    resume_from_checkpoint=None,
+    reset_training=False
 ):
     model = FusionPoseNet(
         cam_k=cam_k
@@ -199,17 +200,33 @@ def train(
         print(f"Loading checkpoint from {resume_from_checkpoint}")
         checkpoint = torch.load(resume_from_checkpoint, map_location=device)
         
+        # Carica sempre i pesi del modello
         model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         
-        if 'scaler_state_dict' in checkpoint:
-            scaler.load_state_dict(checkpoint['scaler_state_dict'])
+        if reset_training:
+            # MODALITÀ FINE-TUNING / PHASE 2: Carica solo i pesi, riparte da zero
+            print(">>> ⚠️ RESET TRAINING ATTIVO: Ignoro epoch e optimizer del checkpoint.")
+            print(">>> Si riparte da Epoch 0 con i nuovi Learning Rate.")
+            print(f"    - RGB Backbone: {lr_rgb_backbone:.2e}")
+            print(f"    - New Components: {lr_new_components:.2e}")
+            start_epoch = 0
+            best_loss = float('inf')
+            # Non carichiamo optimizer/scheduler/scaler state (usiamo quelli freschi appena creati)
+        else:
+            # MODALITÀ RESUME NORMALE: Continua da dove era rimasto
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            
+            if 'scaler_state_dict' in checkpoint:
+                scaler.load_state_dict(checkpoint['scaler_state_dict'])
+            
+            start_epoch = checkpoint['epoch']
+            best_loss = checkpoint['best_loss']
+            
+            print(f"Resumed from epoch {start_epoch} with best loss {best_loss:.4f}")
         
-        start_epoch = checkpoint['epoch']
-        best_loss = checkpoint['best_loss']
-        
-        print(f"Resumed from epoch {start_epoch} with best loss {best_loss:.4f}")
+        print(f"Resumed logic complete. Start Epoch: {start_epoch}")
+
     
     print("Mixed Precision (AMP): ENABLED")
 
