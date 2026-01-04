@@ -84,6 +84,7 @@ class FusionPoseNet(nn.Module):
         self.z_head = nn.Sequential(
             nn.Linear(1024, 128),
             nn.ReLU(),
+            nn.Dropout(0.2),
             nn.Linear(128, 1) # Output: Z (metri)
         )
 
@@ -94,6 +95,7 @@ class FusionPoseNet(nn.Module):
         self.offset_head = nn.Sequential(
             nn.Linear(1024, 128),
             nn.ReLU(),
+            nn.Dropout(0.2),
             nn.Linear(128, 2) # Output: δu, δv (correzioni a u e v ottenuti dal BBOX)
         )
 

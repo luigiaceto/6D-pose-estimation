@@ -159,7 +159,7 @@ def train(
 
     criterion = RGBDPoseLoss(
         add_weight=100.0,
-        proj_weight=1.0,
+        proj_weight=1.0, # forse meglio 0.2 ???
         cam_k=cam_k,
         model_points_dict=points_dict
     ).to(device)
