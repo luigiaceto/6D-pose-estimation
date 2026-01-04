@@ -138,7 +138,6 @@ def create_dataset_YOLO(number_classes, train_samples, validation_samples, test_
     dataset_root = Path("datasets") / "linemod" / "DenseFusion" / "Linemod_preprocessed" / "data"
 
     # count also the number of instances of each class
-    # classes = range(0, number_classes)
     counter_df = pd.DataFrame()
     for idx in range(3):
         if idx == 0:

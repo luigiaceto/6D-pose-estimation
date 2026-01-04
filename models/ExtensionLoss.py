@@ -19,7 +19,7 @@ class RGBDPoseLoss(nn.Module):
     3. Pinhole Constraint: Loss sulla riproiezione 2D (u, v) per legare geometria e visione.
     """
     
-    def __init__(self, cam_k, model_points_dict):
+    def __init__(self, add_weight, proj_weight, cam_k, model_points_dict):
         super(RGBDPoseLoss, self).__init__()
 
         # Buffer per parametri camera
@@ -44,8 +44,8 @@ class RGBDPoseLoss(nn.Module):
 
         self.proj_loss_fn = nn.MSELoss()
 
-        self.w_add = 10.0   
-        self.w_proj = 1.0
+        self.w_add = add_weight   
+        self.w_proj = proj_weight
 
 
     def forward(self, pred_quat, pred_trans, gt_quat, gt_trans, pred_2d, class_ids):
