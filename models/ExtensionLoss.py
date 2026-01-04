@@ -88,7 +88,7 @@ class RGBDPoseLoss(nn.Module):
         # loss_r (valore ~0.25) * 10.0 = ~2.5
         # loss_t (valore ~0.05m con L1Loss) * 5.0 = ~0.25
         # Rotazione ha priorità (10x) ma translation non causa overfitting (5.0 invece di 20.0)
-        total_loss = 25.0 * loss_r + 2.0 * loss_t + 1.0 * loss_p       
+        total_loss = 30.0 * loss_r + 1.0 * loss_t + 1.0 * loss_p       
          
         # --- LOGGING ---
         with torch.no_grad():
