@@ -22,6 +22,7 @@ def train_one_epoch(
     total_loss_sum = 0
     add_loss_sum = 0
     proj_loss_sum = 0
+    rot_loss_sum = 0
     trans_err_cm_sum = 0
     proj_err_px_sum = 0
     rot_err_deg_sum = 0
@@ -73,6 +74,7 @@ def train_one_epoch(
         'total_loss_avg': total_loss_sum / len(loader),
         'add_loss_avg': add_loss_sum / len(loader),
         'proj_loss_avg': proj_loss_sum / len(loader),
+        'rot_loss_avg': rot_loss_sum / len(loader),
         'trans_err_cm_avg': trans_err_cm_sum / len(loader),
         'proj_err_px_avg': proj_err_px_sum / len(loader),
         'rot_err_deg_avg': rot_err_deg_sum / len(loader)
@@ -153,10 +155,7 @@ def train(
     device='cuda',
     freeze_rgb_epochs=5,
     partial_unfreeze=False,
-    resume_from_checkpoint=None,
-    reset_training=False,
-    loss_mode='add',
-    freeze_config=None
+    resume_from_checkpoint=None
 ):
     points_dict = load_all_models_points(dataset_root, num_points=1000)
 
@@ -164,108 +163,33 @@ def train(
         cam_k=cam_k
     ).to(device)
 
-    # Configurazione Loss in base a loss_mode
-    if loss_mode == 'add':
-        # Modalità standard: ADD + Projection
-        criterion = RGBDPoseLoss(
-            add_weight=100.0,
-            proj_weight=0.2,
-            cam_k=cam_k,
-            model_points_dict=points_dict,
-            loss_mode='add'
-        ).to(device)
-        print("\ud83c\udfaf Loss Mode: ADD (w_add=100.0, w_proj=0.2)")
-    elif loss_mode == 'rotation':
-        # Modalità chirurgia rotazione: solo rotation loss
-        criterion = RGBDPoseLoss(
-            add_weight=0.1,    # Molto basso, solo per coerenza geometrica
-            proj_weight=0.0,   # Disattivata
-            rot_weight=10.0,   # PRIORITÀ ASSOLUTA
-            cam_k=cam_k,
-            model_points_dict=points_dict,
-            loss_mode='rotation'
-        ).to(device)
-        print("\ud83c\udfaf Loss Mode: ROTATION (w_rot=10.0, w_add=0.1)")
-    else:
-        raise ValueError(f"loss_mode non valida: {loss_mode}. Usa 'add' o 'rotation'.")
-    
-    # Default freeze_config se non specificato
-    if freeze_config is None:
-        freeze_config = {
-            'rgb_backbone': False,
-            'depth_backbone': False,
-            'fusion': False,
-            'rot_head': False,
-            'z_head': False,
-            'offset_head': False
-        }
+    criterion = RGBDPoseLoss(
+        add_weight=100.0,
+        proj_weight=0.2,
+        cam_k=cam_k,
+        model_points_dict=points_dict
+    ).to(device)
 
-    # Configurazione optimizer in base a freeze_config
-    params = []
-    
-    if not freeze_config['rgb_backbone']:
-        params.append({'params': model.rgb_backbone.parameters(), 'lr': lr_rgb_backbone})
-        print("  ✅ RGB Backbone: TRAINABLE")
-    else:
-        print("  ❌ RGB Backbone: FROZEN")
-        for p in model.rgb_backbone.parameters():
-            p.requires_grad = False
-    
-    if not freeze_config['depth_backbone']:
-        params.append({'params': model.depth_backbone.parameters(), 'lr': lr_new_components})
-        print("  ✅ Depth Backbone: TRAINABLE")
-    else:
-        print("  ❌ Depth Backbone: FROZEN")
-        for p in model.depth_backbone.parameters():
-            p.requires_grad = False
-    
-    if not freeze_config['fusion']:
-        params.append({'params': model.fusion_fc.parameters(), 'lr': lr_new_components})
-        print("  ✅ Fusion Layer: TRAINABLE")
-    else:
-        print("  ❌ Fusion Layer: FROZEN")
-        for p in model.fusion_fc.parameters():
-            p.requires_grad = False
-    
-    if not freeze_config['rot_head']:
-        params.append({'params': model.rot_head.parameters(), 'lr': lr_new_components})
-        print("  ✅ Rotation Head: TRAINABLE")
-    else:
-        print("  ❌ Rotation Head: FROZEN")
-        for p in model.rot_head.parameters():
-            p.requires_grad = False
-    
-    if not freeze_config['z_head']:
-        params.append({'params': model.z_head.parameters(), 'lr': lr_new_components})
-        print("  ✅ Z Head: TRAINABLE")
-    else:
-        print("  ❌ Z Head: FROZEN")
-        for p in model.z_head.parameters():
-            p.requires_grad = False
-    
-    if not freeze_config['offset_head']:
-        params.append({'params': model.offset_head.parameters(), 'lr': lr_new_components})
-        print("  ✅ Offset Head: TRAINABLE")
-    else:
-        print("  ❌ Offset Head: FROZEN")
-        for p in model.offset_head.parameters():
-            p.requires_grad = False
+    params = [
+        {'params': model.rgb_backbone.parameters(), 'lr': lr_rgb_backbone},
+        {'params': model.depth_backbone.parameters(), 'lr': lr_new_components},
+        {'params': model.fusion_fc.parameters(), 'lr': lr_new_components},
+        {'params': model.rot_head.parameters(), 'lr': lr_new_components},
+        {'params': model.z_head.parameters(), 'lr': lr_new_components},
+        {'params': model.offset_head.parameters(), 'lr': lr_new_components}
+    ]
 
     optimizer = optim.AdamW(
         params,
         weight_decay=weight_decay
     )
     
-    # Scheduler semplificato (compatibile con numero dinamico di param groups)
-    min_lrs = [1e-8] * len(params)  # Un min_lr per ogni gruppo
-    
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, 
         mode='min',
-        factor=0.1,
-        patience=10,
-        min_lr=min_lrs,
-        # verbose=True
+        factor=0.5,
+        patience=5,
+        min_lr=[1e-7, 1e-7, 1e-7, 1e-7, 1e-7, 1e-7]
     )
 
     scaler = torch.amp.GradScaler('cuda', enabled=True)
@@ -278,38 +202,22 @@ def train(
         print(f"Loading checkpoint from {resume_from_checkpoint}")
         checkpoint = torch.load(resume_from_checkpoint, map_location=device)
         
-        # Carica sempre i pesi del modello
         model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         
-        if reset_training:
-            # MODALITÀ FINE-TUNING / PHASE 2: Carica solo i pesi, riparte da zero
-            print(">>> ⚠️ RESET TRAINING ATTIVO: Ignoro epoch e optimizer del checkpoint.")
-            print(">>> Si riparte da Epoch 0 con i nuovi Learning Rate.")
-            print(f"    - RGB Backbone: {lr_rgb_backbone:.2e}")
-            print(f"    - New Components: {lr_new_components:.2e}")
-            start_epoch = 0
-            best_loss = float('inf')
-            # Non carichiamo optimizer/scheduler/scaler state (usiamo quelli freschi appena creati)
-        else:
-            # MODALITÀ RESUME NORMALE: Continua da dove era rimasto
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-            
-            if 'scaler_state_dict' in checkpoint:
-                scaler.load_state_dict(checkpoint['scaler_state_dict'])
-            
-            start_epoch = checkpoint['epoch']
-            best_loss = checkpoint['best_loss']
-            
-            print(f"Resumed from epoch {start_epoch} with best loss {best_loss:.4f}")
+        if 'scaler_state_dict' in checkpoint:
+            scaler.load_state_dict(checkpoint['scaler_state_dict'])
         
-        print(f"Resumed logic complete. Start Epoch: {start_epoch}")
+        start_epoch = checkpoint['epoch']
+        best_loss = checkpoint['best_loss']
+        
+        print(f"Resumed from epoch {start_epoch} with best loss {best_loss:.4f}")
 
     
     print("Mixed Precision (AMP): ENABLED")
 
     model.freeze_rgb()
-    already_unfreezed = False # serve per evitare inconsistenze durante l'unfreezing partendo da un checkpoint
     
     for epoch in range(start_epoch, epochs):
         print(f"\nEpoch {epoch+1}/{epochs}")
@@ -322,14 +230,9 @@ def train(
         if epoch < freeze_rgb_epochs:
             model.freeze_rgb()
         elif epoch == freeze_rgb_epochs:
-            # È il momento dello sblocco!
             model.unfreeze_rgb(partial=partial_unfreeze)
-            
-            # --- FIX CRITICO: RESET LEARNING RATE BACKBONE ---
-            # Forziamo il LR della backbone al valore iniziale (1e-6), ignorando 
-            # eventuali tagli fatti dallo scheduler durante il freeze.
             optimizer.param_groups[0]['lr'] = lr_rgb_backbone
-            print(f">>> 🔓 UNFREEZE COMPLETO: Backbone LR resettato a {lr_rgb_backbone:.2e}")
+            print(f">>> 🔓 RGB Backbone Unfrozen (LR reset to {lr_rgb_backbone:.2e})")
             
         train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device)
         print(
