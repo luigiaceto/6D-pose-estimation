@@ -22,14 +22,13 @@ def train_one_epoch(
     total_loss_sum = 0
     add_loss_sum = 0
     proj_loss_sum = 0
-    rot_loss_sum = 0
+    rot_loss_sum = 0  # ✅ AGGIUNTO
     trans_err_cm_sum = 0
     proj_err_px_sum = 0
-    rot_err_deg_sum = 0
+    rot_err_asymm_deg_sum = 0
     
     pbar = tqdm(loader, desc="** Training **")
     for batch in pbar:
-        # Sposta dati su GPU
         cropped_img = batch['cropped_img'].to(device, non_blocking=True)
         gt_quaternion = batch['quaternion'].to(device, non_blocking=True)
         gt_translation = batch['translation'].to(device, non_blocking=True)
@@ -68,7 +67,7 @@ def train_one_epoch(
         rot_loss_sum += loss_dict['rot_loss'].item()
         trans_err_cm_sum += loss_dict['trans_err_cm'].item()
         proj_err_px_sum += loss_dict['proj_err_px'].item()
-        rot_err_deg_sum += loss_dict['rot_err_deg']
+        rot_err_asymm_deg_sum += loss_dict['rot_err_asymm_deg']
     
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
@@ -77,7 +76,7 @@ def train_one_epoch(
         'rot_loss_avg': rot_loss_sum / len(loader),
         'trans_err_cm_avg': trans_err_cm_sum / len(loader),
         'proj_err_px_avg': proj_err_px_sum / len(loader),
-        'rot_err_deg_avg': rot_err_deg_sum / len(loader)
+        'rot_err_asymm_deg_avg': rot_err_asymm_deg_sum / len(loader)
     }
 
     return avg_metrics
@@ -97,7 +96,7 @@ def validate(
     rot_loss_sum = 0
     trans_err_cm_sum = 0
     proj_err_px_sum = 0
-    rot_err_deg_sum = 0
+    rot_err_asymm_deg_sum = 0
     
     with torch.no_grad():
         for batch in tqdm(loader, desc="** Validation **"):
@@ -128,7 +127,7 @@ def validate(
             rot_loss_sum += loss_dict['rot_loss'].item()
             trans_err_cm_sum += loss_dict['trans_err_cm'].item()
             proj_err_px_sum += loss_dict['proj_err_px'].item()
-            rot_err_deg_sum += loss_dict['rot_err_deg']
+            rot_err_asymm_deg_sum += loss_dict['rot_err_asymm_deg']
 
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
@@ -137,7 +136,7 @@ def validate(
         'rot_loss_avg': rot_loss_sum / len(loader),
         'trans_err_cm_avg': trans_err_cm_sum / len(loader),
         'proj_err_px_avg': proj_err_px_sum / len(loader),
-        'rot_err_deg_avg': rot_err_deg_sum / len(loader)
+        'rot_err_asymm_deg_avg': rot_err_asymm_deg_sum / len(loader)
     }
 
     return avg_metrics
@@ -197,22 +196,35 @@ def train(
     start_epoch = 0
     best_loss = float('inf')
     
-    # Resume from checkpoint se fornito
     if resume_from_checkpoint is not None:
         print(f"Loading checkpoint from {resume_from_checkpoint}")
         checkpoint = torch.load(resume_from_checkpoint, map_location=device)
         
         model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         
-        if 'scaler_state_dict' in checkpoint:
-            scaler.load_state_dict(checkpoint['scaler_state_dict'])
+        if reset_training:
+            # MODALITÀ FINE-TUNING / PHASE 2: Carica solo i pesi, riparte da zero
+            print(">>> RESET TRAINING ATTIVO: Ignoro epoch e optimizer del checkpoint.")
+            print(">>> Si riparte da Epoch 0 con i nuovi Learning Rate.")
+            print(f"    - RGB Backbone: {lr_rgb_backbone:.2e}")
+            print(f"    - New Components: {lr_new_components:.2e}")
+            start_epoch = 0
+            best_loss = float('inf')
+            # Non carichiamo optimizer/scheduler/scaler state (usiamo quelli freschi appena creati)
+        else:
+            # MODALITÀ RESUME NORMALE: Continua da dove era rimasto
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            
+            if 'scaler_state_dict' in checkpoint:
+                scaler.load_state_dict(checkpoint['scaler_state_dict'])
+            
+            start_epoch = checkpoint['epoch']
+            best_loss = checkpoint['best_loss']
+            
+            print(f"Resumed from epoch {start_epoch} with best loss {best_loss:.4f}")
         
-        start_epoch = checkpoint['epoch']
-        best_loss = checkpoint['best_loss']
-        
-        print(f"Resumed from epoch {start_epoch} with best loss {best_loss:.4f}")
+        print(f"Resumed logic complete. Start Epoch: {start_epoch}")
 
     
     print("Mixed Precision (AMP): ENABLED")
@@ -222,10 +234,12 @@ def train(
     for epoch in range(start_epoch, epochs):
         print(f"\nEpoch {epoch+1}/{epochs}")
 
-        lr_backbone = optimizer.param_groups[0]['lr']
-        lr_head = optimizer.param_groups[1]['lr']
-        
-        print(f"LR Backbone RGB: {lr_backbone:.2e} | LR Heads: {lr_head:.2e}")
+        # Stampa LR dinamicamente in base al numero di gruppi
+        if len(optimizer.param_groups) > 0:
+            lrs = [f"{pg['lr']:.2e}" for pg in optimizer.param_groups]
+            print(f"Learning Rates: {' | '.join(lrs)}")
+        else:
+            print("Warning: No trainable parameters!")
 
         if epoch < freeze_rgb_epochs:
             model.freeze_rgb()
@@ -237,13 +251,14 @@ def train(
         train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device)
         print(
             f"  Train Loss: {train_avg_metrics['total_loss_avg']:.4f}, ADD: {train_avg_metrics['add_loss_avg']:.2f}, Rot: {train_avg_metrics['rot_loss_avg']:.2f}, Proj: {train_avg_metrics['proj_loss_avg']:.2f} "
-            f"(Rot Err: {train_avg_metrics['rot_err_deg_avg']:.2f}°, Trans Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {train_avg_metrics['proj_err_px_avg']:.2f} px)"
+            f"(Rot Err: {train_avg_metrics['rot_err_asymm_deg_avg']:.2f}°, Trans Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {train_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
 
         val_avg_metrics = validate(model, val_loader, criterion, device)
+        
         print(
             f"  Val Loss: {val_avg_metrics['total_loss_avg']:.4f}, ADD: {val_avg_metrics['add_loss_avg']:.2f}, Rot: {val_avg_metrics['rot_loss_avg']:.2f}, Proj: {val_avg_metrics['proj_loss_avg']:.2f} "
-            f"(Rot Err: {val_avg_metrics['rot_err_deg_avg']:.2f}°, Trans Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
+            f"(Rot Err: {val_avg_metrics['rot_err_asymm_deg_avg']:.2f}°, Trans Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
 
         scheduler.step(val_avg_metrics['total_loss_avg'])
