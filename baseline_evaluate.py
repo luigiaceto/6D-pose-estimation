@@ -25,7 +25,7 @@ from utils.pose_utils import (
     compute_add_s_rotation_only, 
     compute_rotation_error,
     compute_translation_error,
-    load_model_points, 
+    load_all_models_points,
     print_evaluation_results_table,
     SYMMETRIC_OBJECTS, 
     )
@@ -56,6 +56,11 @@ def evaluate_baseline(
     
     # Get object diameters
     object_diameters = test_dataset.get_object_diameters()
+    
+    # --- FIX CRITICO: CARICA I 1000 PUNTI QUI ---
+    print(">>> 📦 Preloading HIGH RES models (1000 points per object)...")
+    model_points_dict = load_all_models_points(dataset_root, num_points=1000)
+    print(f"    Loaded {len(model_points_dict)} objects with 1000 surface points each")
     
     # Metriche
     symmetric_objects = SYMMETRIC_OBJECTS
@@ -116,8 +121,9 @@ def evaluate_baseline(
             for i in range(len(obj_ids)):
                 obj_id = int(obj_ids[i])
                 
-                # Carica model points
-                model_points = load_model_points(dataset_root, obj_id)
+                # --- FIX CRITICO: USA IL DIZIONARIO CON 1000 PUNTI ---
+                # NON usare load_model_points che restituisce solo gli 8 punti del bbox!
+                model_points = model_points_dict[obj_id].cpu().numpy()  # Converti tensor -> numpy
                 
                 # Rotation e translation errors
                 rot_err = compute_rotation_error(pred_R[i], gt_R[i])
