@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import torchvision.transforms as transforms
 from ultralytics import YOLO
 
-from models.FusionPoseNet import FusionPoseNet
+from models.TridentNetPose import TridentNetPose
 from utils.pose_utils import quaternion_to_rotation_matrix
 from utils.visualization import draw_3d_bbox_colored, draw_axis_colored
 
@@ -104,9 +104,8 @@ def visualize_fusion_predictions(
     print(f"Loading YOLO: {yolo_checkpoint}")
     yolo_model = YOLO(yolo_checkpoint)
     
-    print(f"Loading FusionPoseNet: {fusion_checkpoint}")
-    # Nota: FusionPoseNet richiede cam_k nell'init
-    pose_model = FusionPoseNet(cam_k=cam_k).to(device)
+    print(f"Loading TridentNetPose: {fusion_checkpoint}")
+    pose_model = TridentNetPose(cam_k=cam_k).to(device)
     checkpoint = torch.load(fusion_checkpoint, map_location=device)
     pose_model.load_state_dict(checkpoint['model_state_dict']) # Assumendo salvataggio standard
     pose_model.eval()

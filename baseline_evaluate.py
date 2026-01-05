@@ -13,7 +13,6 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
-import pandas as pd
 
 from models.ResNetPose import ResNetPose
 from models.PinholeCamera import PinholeCamera

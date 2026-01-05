@@ -3,8 +3,8 @@ import torch
 import torch.optim as optim
 from tqdm import tqdm
 
-from models.FusionPoseNet import FusionPoseNet
-from models.ExtensionLoss import RGBDPoseLoss
+from models.TridentNetPose import TridentNetPose
+from models.ExtensionLoss import ExtensionLoss
 from utils.pose_utils import load_all_models_points
 
 
@@ -159,14 +159,14 @@ def train(
 ):
     points_dict = load_all_models_points(dataset_root, num_points=1000)
 
-    model = FusionPoseNet(
+    model = TridentNetPose(
         cam_k=cam_k
     ).to(device)
 
     # Configurazione Loss in base a loss_mode
     if loss_mode == 'add':
         # Modalità standard: ADD + Projection
-        criterion = RGBDPoseLoss(
+        criterion = ExtensionLoss(
             add_weight=100.0,
             proj_weight=0.2,
             cam_k=cam_k,
@@ -176,7 +176,7 @@ def train(
         print("\ud83c\udfaf Loss Mode: ADD (w_add=100.0, w_proj=0.2)")
     elif loss_mode == 'rotation':
         # Modalità chirurgia rotazione: solo rotation loss
-        criterion = RGBDPoseLoss(
+        criterion = ExtensionLoss(
             add_weight=0.1,    # Molto basso, solo per coerenza geometrica
             proj_weight=0.0,   # Disattivata
             rot_weight=10.0,   # PRIORITÀ ASSOLUTA
@@ -307,7 +307,6 @@ def train(
     print("Mixed Precision (AMP): ENABLED")
 
     model.freeze_rgb()
-    already_unfreezed = False # serve per evitare inconsistenze durante l'unfreezing partendo da un checkpoint
     
     for epoch in range(start_epoch, epochs):
         print(f"\nEpoch {epoch+1}/{epochs}")
@@ -332,13 +331,13 @@ def train(
         train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device)
         print(
             f"  Train Loss: {train_avg_metrics['total_loss_avg']:.4f}, ADD: {train_avg_metrics['add_loss_avg']:.2f}, Rot: {train_avg_metrics['rot_loss_avg']:.2f}, Proj: {train_avg_metrics['proj_loss_avg']:.2f} "
-            f"(Rot Err: {train_avg_metrics['rot_err_deg_avg']:.2f}°, Trans Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {train_avg_metrics['proj_err_px_avg']:.2f} px)"
+            f"(Rot Err: {train_avg_metrics['rot_err_asymm_deg_avg']:.2f}°, Trans Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {train_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
 
         val_avg_metrics = validate(model, val_loader, criterion, device)
         print(
             f"  Val Loss: {val_avg_metrics['total_loss_avg']:.4f}, ADD: {val_avg_metrics['add_loss_avg']:.2f}, Rot: {val_avg_metrics['rot_loss_avg']:.2f}, Proj: {val_avg_metrics['proj_loss_avg']:.2f} "
-            f"(Rot Err: {val_avg_metrics['rot_err_deg_avg']:.2f}°, Trans Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
+            f"(Rot Err: {val_avg_metrics['rot_err_asymm_deg_avg']:.2f}°, Trans Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
 
         scheduler.step(val_avg_metrics['total_loss_avg'])

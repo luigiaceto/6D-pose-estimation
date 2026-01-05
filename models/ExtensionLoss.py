@@ -4,14 +4,14 @@ from utils.pose_utils import (
     batch_add_loss, 
     batch_adds_loss, 
     quaternion_to_rotation_matrix,
-    compute_batch_rotation_error,
     compute_quaternion_loss,
     compute_matrix_geodesic_loss,
+    compute_batch_rotation_error_asymm,
     SYMMETRIC_OBJECTS
 )
 
 
-class RGBDPoseLoss(nn.Module):
+class ExtensionLoss(nn.Module):
     """
     Loss ottimizzata per RGB-D Pose Estimation (Extension).
     
@@ -30,7 +30,7 @@ class RGBDPoseLoss(nn.Module):
     """
     
     def __init__(self, add_weight, proj_weight, cam_k, model_points_dict, rot_weight=0.0, loss_mode='add'):
-        super(RGBDPoseLoss, self).__init__()
+        super(ExtensionLoss, self).__init__()
 
         # Buffer per parametri camera
         self.register_buffer(
@@ -40,10 +40,10 @@ class RGBDPoseLoss(nn.Module):
         
         # --- VETTORE MAPPA DI MODELLI 3D ---
         max_id = max(model_points_dict.keys())
-        # tutti agli oggetti hanno lo stesso numero di punti (es. 1000)
+        # tutti gli oggetti hanno lo stesso numero di punti (es. 1000)
         n_pts = list(model_points_dict.values())[0].shape[0]
         bank = torch.zeros((max_id + 1, n_pts, 3), dtype=torch.float32) # vettore dim 16 (da 0 a 15)
-        for oid, pts in model_points_dict.items(): # riempio solo gli indici corrispondenti ad ID (1, 2, 4, 5, ...)
+        for oid, pts in model_points_dict.items(): # riempio solo gli indici corrispondenti ad objectID (1, 2, 4, 5, ...)
             bank[oid] = pts
         self.register_buffer('model_points_bank', bank)
     
@@ -130,10 +130,10 @@ class RGBDPoseLoss(nn.Module):
             rot_losses = []
             for i, cid in enumerate(class_ids):
                 if cid.item() in SYMMETRIC_OBJECTS:
-                    # Per i simmetrici usiamo la geodesic loss sulle matrici
+                    # Per i simmetrici (es. Glue) usiamo la geodesic loss sulle matrici
                     l = compute_matrix_geodesic_loss(pred_quat[i:i+1], gt_quat[i:i+1])
                 else:
-                    # Per asimmetrici (Ape!) usiamo la loss diretta sui quaternioni
+                    # Per asimmetrici (es. Ape) usiamo la loss diretta sui quaternioni
                     l = compute_quaternion_loss(pred_quat[i:i+1], gt_quat[i:i+1])
                 rot_losses.append(l)
             loss_rot = torch.mean(torch.stack(rot_losses))
@@ -149,7 +149,7 @@ class RGBDPoseLoss(nn.Module):
             rot_err_deg = compute_batch_rotation_error_asymm(pred_quat, gt_quat, class_ids, self.symmetry_lookup)
         
         return {
-            # loss
+            # losses
             'total_loss': total_loss,
             'add_loss': loss_add.detach(),
             'proj_loss': loss_proj.detach(),

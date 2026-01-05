@@ -42,7 +42,7 @@ class DepthEncoder(nn.Module):
         return x.view(x.size(0), -1) # Flatten -> (B, feature_dim)
 
 
-class FusionPoseNet(nn.Module):
+class TridentNetPose(nn.Module):
     def __init__(self, cam_k):
         super().__init__()
 

@@ -4,7 +4,7 @@ import pandas as pd
 from tqdm import tqdm
 from collections import defaultdict
 
-from models.FusionPoseNet import FusionPoseNet
+from models.TridentNetPose import TridentNetPose
 from utils.pose_utils import (
     quaternion_to_rotation_matrix,  
     load_all_models_points, 
@@ -28,7 +28,7 @@ def evaluate_extension_batch(
     table_path="extension_results.csv"
 ):
     
-    model = FusionPoseNet(cam_k=cam_k).to(device)
+    model = TridentNetPose(cam_k=cam_k).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()

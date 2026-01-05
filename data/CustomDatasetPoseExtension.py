@@ -92,8 +92,8 @@ class RGBDDatasetPose(CustomDatasetPose):
             # sample  
             "sample_id": torch.tensor([folder_id, sample_id]),
             "cropped_img": cropped_img,
-            "cropped_depth": depth_tensor,
             "rgb": img_tensor,
+            "cropped_depth": depth_tensor,
 
             # label/ground truth
             "obj_id": torch.tensor(obj_id),
@@ -103,5 +103,5 @@ class RGBDDatasetPose(CustomDatasetPose):
             "bbox_base": torch.tensor(bbox_base, dtype=torch.float32),
             "bbox_YOLO": torch.tensor(bbox_YOLO),
             "bbox_dims": torch.tensor(bbox_dims, dtype=torch.float32),
-            "bbox_center_pixel": torch.tensor([cx_pixel, cy_pixel], dtype=torch.float32)
+            "bbox_center_pixel": torch.tensor([cx_pixel, cy_pixel], dtype=torch.float32) # da concatenare nella fusione
         }

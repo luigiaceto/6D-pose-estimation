@@ -10,8 +10,8 @@ from utils.pose_utils import LINEMOD_OBJECT_NAMES
 def draw_2d_bbox(img, box, color, label, thickness=3):
     """Draw bounding box on image with label."""
     x1, y1, x2, y2 = map(int, box)
-    cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness)
-    cv2.putText(img, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+    cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness, lineType=cv2.LINE_AA)
+    cv2.putText(img, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 1, lineType=cv2.LINE_AA)
     return img
 
 def draw_3d_bbox_colored(img, R, t, K, obj_id, models_info, color=(255, 255, 0)):
@@ -56,7 +56,7 @@ def draw_3d_bbox_colored(img, R, t, K, obj_id, models_info, color=(255, 255, 0))
     ]
     for e in edges:
         if e[0] < len(corners_2d) and e[1] < len(corners_2d):
-            cv2.line(img, corners_2d[e[0]], corners_2d[e[1]], color, 2)
+            cv2.line(img, corners_2d[e[0]], corners_2d[e[1]], color, 1, lineType=cv2.LINE_AA)
     
     return img
 
@@ -88,8 +88,8 @@ def draw_axis_colored(img, R, t, K, scale=0.05, colors=None):
     
     if all(p is not None for p in points_2d):
         origin = points_2d[0]
-        cv2.line(img, origin, points_2d[1], colors[0], 3) # X
-        cv2.line(img, origin, points_2d[2], colors[1], 3) # Y
-        cv2.line(img, origin, points_2d[3], colors[2], 3) # Z
+        cv2.line(img, origin, points_2d[1], colors[0], 2, lineType=cv2.LINE_AA) # X
+        cv2.line(img, origin, points_2d[2], colors[1], 2, lineType=cv2.LINE_AA) # Y
+        cv2.line(img, origin, points_2d[3], colors[2], 2, lineType=cv2.LINE_AA) # Z
     
     return img
