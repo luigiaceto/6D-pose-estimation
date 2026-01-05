@@ -10,7 +10,7 @@ import torchvision.transforms as transforms
 from ultralytics import YOLO
 
 from models.TridentNetPose import TridentNetPose
-from utils.pose_utils import quaternion_to_rotation_matrix
+from utils.pose_utils import quaternion_to_rotation_matrix, YOLO_TO_LINEMOD_MAP
 from utils.visualization import draw_3d_bbox_colored, draw_axis_colored
 
 # =============================================================================
@@ -209,7 +209,7 @@ def visualize_fusion_predictions(
             
             # --- F. Recupera Ground Truth ---
             class_id = int(boxes.cls[i])
-            obj_id = class_id + 1 
+            obj_id = YOLO_TO_LINEMOD_MAP[class_id]
             
             # Estrazione ground truth per questa immagine (come baseline)
             if img_idx in gt_data_all:
