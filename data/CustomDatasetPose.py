@@ -8,6 +8,7 @@ import torchvision.transforms as transforms
 
 from utils.pose_utils import IMG_HEIGHT, IMG_WIDTH
 
+
 class CustomDatasetPose(Dataset):
     def __init__(self, dataset_root, split='train', train_ratio=0.8, seed=42, cam_K=None):
         """
