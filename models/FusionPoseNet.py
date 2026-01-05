@@ -85,7 +85,6 @@ class FusionPoseNet(nn.Module):
             nn.Linear(1024, 128),
             nn.ReLU(),
             nn.Dropout(0.2),
-            nn.Dropout(0.2),
             nn.Linear(128, 1) # Output: Z (metri)
         )
 
