@@ -198,7 +198,7 @@ def train(
             1e-7,       # Z Head
             1e-7        # Offset Head
         ],
-        verbose=True
+        # verbose=True
     )
 
     scaler = torch.amp.GradScaler('cuda', enabled=True)
