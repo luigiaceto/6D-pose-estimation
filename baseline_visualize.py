@@ -11,14 +11,12 @@ import yaml
 import os
 import re
 from ultralytics import YOLO
+import matplotlib.pyplot as plt
+import torchvision.transforms as transforms
 
 from models.ResNetPose import ResNetPose
 from models.PinholeCamera import PinholeCamera
-import torchvision.transforms as transforms
-
-import matplotlib.pyplot as plt
-
-from utils.pose_utils import quaternion_to_rotation_matrix
+from utils.pose_utils import quaternion_to_rotation_matrix, YOLO_TO_LINEMOD_MAP
 from utils.visualization import draw_3d_bbox_colored, draw_axis_colored 
 
 def visualize_baseline_predictions(
@@ -172,7 +170,7 @@ def visualize_baseline_predictions(
             
             # Calculate translation
             class_id = int(boxes.cls[i])
-            obj_id = class_id + 1
+            obj_id = YOLO_TO_LINEMOD_MAP[class_id]
             diameter = object_diameters[obj_id]
             
             bbox_xyxy = torch.tensor([[x_min, y_min, x_max, y_max]], device=device, dtype=torch.float32)
