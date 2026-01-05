@@ -154,7 +154,8 @@ def train(
     device='cuda',
     freeze_rgb_epochs=5,
     partial_unfreeze=False,
-    resume_from_checkpoint=None
+    resume_from_checkpoint=None,
+    reset_training=False
 ):
     points_dict = load_all_models_points(dataset_root, num_points=1000)
 
@@ -162,7 +163,7 @@ def train(
         cam_k=cam_k
     ).to(device)
 
-    criterion = RGBDPoseLoss(
+    criterion = ExtensionLoss(
         add_weight=100.0,
         proj_weight=0.2,
         cam_k=cam_k,

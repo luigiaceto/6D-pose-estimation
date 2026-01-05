@@ -1,8 +1,6 @@
 import numpy as np
 import cv2
 
-from utils.pose_utils import LINEMOD_OBJECT_NAMES
-
 # =============================================================================
 # FUNZIONI DI DISEGNO
 # =============================================================================
