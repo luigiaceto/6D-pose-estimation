@@ -4,7 +4,7 @@ from utils.pose_utils import (
     batch_add_loss, 
     batch_adds_loss, 
     quaternion_to_rotation_matrix,
-    compute_batch_rotation_error,
+    compute_batch_rotation_error_asymm,
     compute_quaternion_loss,
     compute_matrix_geodesic_loss,
     SYMMETRIC_OBJECTS
@@ -71,6 +71,14 @@ class RGBDPoseLoss(nn.Module):
         Calcola la loss totale pesata.
         """
         
+        # Calcola gt_2d_target una volta (serve per logging anche in modalità rotation)
+        fx, fy = self.cam_k[:, 0:1], self.cam_k[:, 1:2]
+        cx, cy = self.cam_k[:, 2:3], self.cam_k[:, 3:4]
+        gt_z_safe = torch.clamp(gt_trans[:, 2:3], min=0.001)
+        gt_u = (gt_trans[:, 0:1] * fx / gt_z_safe) + cx
+        gt_v = (gt_trans[:, 1:2] * fy / gt_z_safe) + cy
+        gt_2d_target = torch.cat([gt_u, gt_v], dim=1)
+        
         if self.loss_mode == 'add':
             # ========== MODALITÀ ADD (Default) ==========
             batch_points = self.model_points_bank[class_ids.long()]
@@ -93,14 +101,6 @@ class RGBDPoseLoss(nn.Module):
                     losses[i] = l_adds
 
             loss_add = torch.mean(losses)
-            
-            fx, fy = self.cam_k[:, 0:1], self.cam_k[:, 1:2]
-            cx, cy = self.cam_k[:, 2:3], self.cam_k[:, 3:4]
-            gt_z_safe = torch.clamp(gt_trans[:, 2:3], min=0.001)
-            gt_u = (gt_trans[:, 0:1] * fx / gt_z_safe) + cx
-            gt_v = (gt_trans[:, 1:2] * fy / gt_z_safe) + cy
-            gt_2d_target = torch.cat([gt_u, gt_v], dim=1)
-
             loss_proj = self.proj_loss_fn(pred_2d, gt_2d_target)
             loss_rot = torch.tensor(0.0, device=pred_quat.device)  # Placeholder
 

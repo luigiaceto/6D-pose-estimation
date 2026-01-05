@@ -312,10 +312,12 @@ def train(
     for epoch in range(start_epoch, epochs):
         print(f"\nEpoch {epoch+1}/{epochs}")
 
-        lr_backbone = optimizer.param_groups[0]['lr']
-        lr_head = optimizer.param_groups[1]['lr']
-        
-        print(f"LR Backbone RGB: {lr_backbone:.2e} | LR Heads: {lr_head:.2e}")
+        # Stampa LR dinamicamente in base al numero di gruppi
+        if len(optimizer.param_groups) > 0:
+            lrs = [f"{pg['lr']:.2e}" for pg in optimizer.param_groups]
+            print(f"Learning Rates: {' | '.join(lrs)}")
+        else:
+            print("Warning: No trainable parameters!")
 
         if epoch < freeze_rgb_epochs:
             model.freeze_rgb()
