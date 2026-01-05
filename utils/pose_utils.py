@@ -50,9 +50,7 @@ def quaternion_to_rotation_matrix(quaternion):
     """
     # Normalizza per sicurezza (eps evita divisioni per zero)
     quaternion = F.normalize(quaternion, p=2, dim=1, eps=1e-8)
-    
     w, x, y, z = quaternion[:, 0], quaternion[:, 1], quaternion[:, 2], quaternion[:, 3]
-    
     batch_size = quaternion.shape[0]
     R = torch.zeros(batch_size, 3, 3, device=quaternion.device, dtype=quaternion.dtype)
     
@@ -81,12 +79,10 @@ def compute_quaternion_loss(q1, q2):
         # Normalize con epsilon sicuro
         q1 = F.normalize(q1, p=2, dim=1, eps=1e-6)
         q2 = F.normalize(q2, p=2, dim=1, eps=1e-6)
-        
         # Dot product con abs per gestire q = -q
         dot = torch.abs(torch.sum(q1 * q2, dim=1))
         # Clamp per sicurezza (non dovrebbe servire con abs)
         dot = torch.clamp(dot, 0.0, 1.0)
-        
         return torch.mean(1.0 - dot)
     
 def compute_matrix_geodesic_loss(pred_quat, gt_quat):
@@ -247,12 +243,10 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
         columns={
             'object_name': 'Object Name',
             'num_samples': '#Samples',
-            'accuracy_10p': 'Accuracy @10% (%)',
-            'add_r_accuracy_10p': 'ADD-R Accuracy @10% (%)',
             'rot_mean': 'Rotation Error (deg)',
             'trans_mean': 'Translation Error (cm)',
-            'add_mean': 'ADD / ADD-S (cm)',
-            'add_rot_only_mean': 'ADD-R (cm)'
+            'add_mean': 'ADD(-S) (cm)',
+            'accuracy_10p': 'Accuracy @10% (%)'
         }
     )
 
@@ -260,12 +254,10 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
         [
             'Object Name',
             '#Samples',
-            'Accuracy @10% (%)',
-            'ADD-R Accuracy @10% (%)',
             'Rotation Error (deg)',
             'Translation Error (cm)',
-            'ADD / ADD-S (cm)',
-            'ADD-R (cm)'
+            'ADD(-S) (cm)',
+            'Accuracy @10% (%)'
         ]
     ]
 
@@ -277,7 +269,6 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
     return df
 
 # USATE DALLA ADD-Loss
-
 def batch_add_loss(pred_R, pred_t, gt_R, gt_t, points):
     """
     Calcola ADD loss (Asymmetric) per un batch.

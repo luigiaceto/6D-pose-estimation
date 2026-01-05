@@ -28,7 +28,6 @@ def train_one_epoch(
     
     pbar = tqdm(loader, desc="** Training **")
     for batch in pbar:
-        # Sposta dati su GPU
         cropped_img = batch['cropped_img'].to(device, non_blocking=True)
         gt_quaternion = batch['quaternion'].to(device, non_blocking=True)
         gt_translation = batch['translation'].to(device, non_blocking=True)
@@ -174,8 +173,8 @@ def train(
         
         # Gruppo 3: Le Tre Teste
         {'params': model.rot_head.parameters(), 'lr': lr_new_components},
-        {'params': model.z_head.parameters(), 'lr': lr_new_components},      # Testa per Z (metri)
-        {'params': model.offset_head.parameters(), 'lr': lr_new_components}, # Testa per Offset (pixel)
+        {'params': model.z_head.parameters(), 'lr': lr_new_components},      
+        {'params': model.offset_head.parameters(), 'lr': lr_new_components}
     ]
 
     optimizer = optim.AdamW(
@@ -205,7 +204,6 @@ def train(
     start_epoch = 0
     best_loss = float('inf')
     
-    # Resume from checkpoint se fornito
     if resume_from_checkpoint is not None:
         print(f"Loading checkpoint from {resume_from_checkpoint}")
         checkpoint = torch.load(resume_from_checkpoint, map_location=device)
