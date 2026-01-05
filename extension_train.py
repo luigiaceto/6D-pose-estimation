@@ -204,49 +204,49 @@ def train(
     
     if not freeze_config['rgb_backbone']:
         params.append({'params': model.rgb_backbone.parameters(), 'lr': lr_rgb_backbone})
-        print("  ✅ RGB Backbone: TRAINABLE")
+        print("  RGB Backbone: TRAINABLE")
     else:
-        print("  ❌ RGB Backbone: FROZEN")
+        print(" RGB Backbone: FROZEN")
         for p in model.rgb_backbone.parameters():
             p.requires_grad = False
     
     if not freeze_config['depth_backbone']:
         params.append({'params': model.depth_backbone.parameters(), 'lr': lr_new_components})
-        print("  ✅ Depth Backbone: TRAINABLE")
+        print(" Depth Backbone: TRAINABLE")
     else:
-        print("  ❌ Depth Backbone: FROZEN")
+        print(" Depth Backbone: FROZEN")
         for p in model.depth_backbone.parameters():
             p.requires_grad = False
     
     if not freeze_config['fusion']:
         params.append({'params': model.fusion_fc.parameters(), 'lr': lr_new_components})
-        print("  ✅ Fusion Layer: TRAINABLE")
+        print(" Fusion Layer: TRAINABLE")
     else:
-        print("  ❌ Fusion Layer: FROZEN")
+        print(" Fusion Layer: FROZEN")
         for p in model.fusion_fc.parameters():
             p.requires_grad = False
     
     if not freeze_config['rot_head']:
         params.append({'params': model.rot_head.parameters(), 'lr': lr_new_components})
-        print("  ✅ Rotation Head: TRAINABLE")
+        print(" Rotation Head: TRAINABLE")
     else:
-        print("  ❌ Rotation Head: FROZEN")
+        print(" Rotation Head: FROZEN")
         for p in model.rot_head.parameters():
             p.requires_grad = False
     
     if not freeze_config['z_head']:
         params.append({'params': model.z_head.parameters(), 'lr': lr_new_components})
-        print("  ✅ Z Head: TRAINABLE")
+        print(" Z Head: TRAINABLE")
     else:
-        print("  ❌ Z Head: FROZEN")
+        print(" Z Head: FROZEN")
         for p in model.z_head.parameters():
             p.requires_grad = False
     
     if not freeze_config['offset_head']:
         params.append({'params': model.offset_head.parameters(), 'lr': lr_new_components})
-        print("  ✅ Offset Head: TRAINABLE")
+        print("  Offset Head: TRAINABLE")
     else:
-        print("  ❌ Offset Head: FROZEN")
+        print("  Offset Head: FROZEN")
         for p in model.offset_head.parameters():
             p.requires_grad = False
 
@@ -281,7 +281,7 @@ def train(
         
         if reset_training:
             # MODALITÀ FINE-TUNING / PHASE 2: Carica solo i pesi, riparte da zero
-            print(">>> ⚠️ RESET TRAINING ATTIVO: Ignoro epoch e optimizer del checkpoint.")
+            print(">>> RESET TRAINING ATTIVO: Ignoro epoch e optimizer del checkpoint.")
             print(">>> Si riparte da Epoch 0 con i nuovi Learning Rate.")
             print(f"    - RGB Backbone: {lr_rgb_backbone:.2e}")
             print(f"    - New Components: {lr_new_components:.2e}")
@@ -327,7 +327,7 @@ def train(
             # Forziamo il LR della backbone al valore iniziale (1e-6), ignorando 
             # eventuali tagli fatti dallo scheduler durante il freeze.
             optimizer.param_groups[0]['lr'] = lr_rgb_backbone
-            print(f">>> 🔓 UNFREEZE COMPLETO: Backbone LR resettato a {lr_rgb_backbone:.2e}")
+            print(f" UNFREEZE COMPLETO: Backbone LR resettato a {lr_rgb_backbone:.2e}")
             
         train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device)
         print(
