@@ -56,7 +56,10 @@ class RGBDPoseLoss(nn.Module):
         self.register_buffer('symmetry_lookup', symmetry_mask)
 
         self.proj_loss_fn = nn.MSELoss()
-        self.trans_loss_fn = nn.L1Loss()  # 🎯 TRANSLATION BOOSTER: L1 è brutale sui centimetri
+        
+        # 🏹 ROBIN HOOD LOSS: SmoothL1 con reduction='none' per pesare ogni classe
+        # beta=0.05 -> sotto 5cm usa L2 (atterraggio morbido), sopra usa L1 (robusto)
+        self.trans_loss_fn = nn.SmoothL1Loss(reduction='none', beta=0.05)
 
         self.w_add = add_weight   
         self.w_proj = proj_weight
@@ -106,8 +109,33 @@ class RGBDPoseLoss(nn.Module):
             loss_proj = self.proj_loss_fn(pred_2d, gt_2d_target)
             loss_rot = torch.tensor(0.0, device=pred_quat.device)  # Placeholder
             
-            # 🎯 TRANSLATION LOSS DIRETTA (Bombardamento sui centimetri)
-            loss_trans_pure = self.trans_loss_fn(pred_trans, gt_trans)
+            # � ROBIN HOOD TRANSLATION LOSS: Toglie ai ricchi (grandi) per dare ai poveri (piccoli)
+            # Calcola errore per sample: (B, 3) -> media XYZ -> (B,)
+            per_sample_trans_loss = self.trans_loss_fn(pred_trans, gt_trans).mean(dim=1)
+            
+            # Pesi di default: 1.0
+            class_weights = torch.ones_like(per_sample_trans_loss)
+            
+            # POVERI (oggetti piccoli): Peso ALTO -> errore conta molto
+            APE_ID = 1    # ⚠️ VERIFICA: Nel tuo dataset qual è l'ID dell'Ape? (cartella 01)
+            DUCK_ID = 9   # ⚠️ VERIFICA: Duck probabilmente è 09
+            
+            class_weights[class_ids == APE_ID] = 10.0   # 🐝 APE: Massima priorità
+            class_weights[class_ids == DUCK_ID] = 5.0   # 🦆 DUCK: Alta priorità
+            
+            # RICCHI (oggetti grandi): Peso BASSO -> errore conta poco
+            EGGBOX_ID = 10  # 📦 Eggbox (cartella 10)
+            GLUE_ID = 11    # 🧴 Glue (cartella 11)
+            IRON_ID = 13    # 🔨 Iron (cartella 13)
+            LAMP_ID = 14    # 💡 Lamp (cartella 14)
+            
+            class_weights[class_ids == EGGBOX_ID] = 0.2  # Gli oggetti grandi "donano" importanza
+            class_weights[class_ids == GLUE_ID] = 0.2
+            class_weights[class_ids == IRON_ID] = 0.2
+            class_weights[class_ids == LAMP_ID] = 0.2
+            
+            # Media pesata: priorità agli oggetti piccoli!
+            loss_trans_pure = (per_sample_trans_loss * class_weights).mean()
 
             total_loss = self.w_add * loss_add + self.w_proj * loss_proj + self.w_trans * loss_trans_pure
         
@@ -145,8 +173,28 @@ class RGBDPoseLoss(nn.Module):
             
             loss_proj = torch.tensor(0.0, device=pred_quat.device)  # Non usata in questa modalità
             
-            # 🎯 TRANSLATION LOSS DIRETTA (anche in modalità rotation)
-            loss_trans_pure = self.trans_loss_fn(pred_trans, gt_trans)
+            # � ROBIN HOOD TRANSLATION LOSS (anche in modalità rotation)
+            per_sample_trans_loss = self.trans_loss_fn(pred_trans, gt_trans).mean(dim=1)
+            
+            class_weights = torch.ones_like(per_sample_trans_loss)
+            
+            # POVERI (piccoli): Peso ALTO
+            APE_ID = 1
+            DUCK_ID = 9
+            class_weights[class_ids == APE_ID] = 10.0
+            class_weights[class_ids == DUCK_ID] = 5.0
+            
+            # RICCHI (grandi): Peso BASSO
+            EGGBOX_ID = 10
+            GLUE_ID = 11
+            IRON_ID = 13
+            LAMP_ID = 14
+            class_weights[class_ids == EGGBOX_ID] = 0.2
+            class_weights[class_ids == GLUE_ID] = 0.2
+            class_weights[class_ids == IRON_ID] = 0.2
+            class_weights[class_ids == LAMP_ID] = 0.2
+            
+            loss_trans_pure = (per_sample_trans_loss * class_weights).mean()
             
             # PRIORITÀ TOTALE SULLA ROTAZIONE (o traslazione se w_trans > 0)
             total_loss = self.w_add * loss_add + self.w_rot * loss_rot + self.w_trans * loss_trans_pure
