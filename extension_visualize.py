@@ -60,7 +60,9 @@ def process_depth_crop(depth_path, bbox, target_size=(224, 224)):
 def visualize_fusion_predictions(
     dataset_root,
     cam_k,
-    image_path,
+    test_dataset=None,
+    sample_idx=None,
+    image_path=None,
     yolo_checkpoint=str(Path("checkpoints") / "best.pt"),
     fusion_checkpoint=str(Path("checkpoints") / "best_fusion_model.pt"), # Checkpoint Extension
     device='cuda',
@@ -69,12 +71,36 @@ def visualize_fusion_predictions(
     img_std=[0.229, 0.224, 0.225]
 ):
     
-    # 1. Carica Info Modelli
+    # 1. Gestione Selezione Immagine dal Test Set
+    if test_dataset is not None:
+        test_samples = test_dataset.get_samples_id()
+        
+        if sample_idx is not None:
+            # Usa sample specifico dal test set
+            if sample_idx < 0 or sample_idx >= len(test_samples):
+                raise ValueError(f"sample_idx {sample_idx} fuori range. Test set ha {len(test_samples)} samples.")
+            folder_id, sample_id = test_samples[sample_idx]
+        else:
+            # Selezione casuale dal test set
+            folder_id, sample_id = test_samples[np.random.randint(len(test_samples))]
+        
+        image_path = str(dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png")
+        print(f"📊 Visualizzando sample dal TEST SET: folder {folder_id:02d}, image {sample_id:04d}")
+    
+    elif image_path is None:
+        raise ValueError("Devi fornire 'test_dataset' oppure 'image_path'.")
+    
+    else:
+        # Warning: path manuale
+        print("⚠️  ATTENZIONE: image_path fornito manualmente. Impossibile verificare se è nel test set.")
+        print("   Raccomandazione: usa 'test_dataset' per garantire selezione dal test set.")
+    
+    # 2. Carica Info Modelli
     models_info_path = dataset_root / "models" / "models_info.yml"
     with open(models_info_path, 'r') as f:
         models_info = yaml.load(f, Loader=yaml.CLoader)
     
-    # 2. Load Models
+    # 3. Load Models
     print(f"Loading YOLO: {yolo_checkpoint}")
     yolo_model = YOLO(yolo_checkpoint)
     
@@ -85,23 +111,23 @@ def visualize_fusion_predictions(
     pose_model.load_state_dict(checkpoint['model_state_dict']) # Assumendo salvataggio standard
     pose_model.eval()
     
-    # 3. Trasformazioni RGB
+    # 4. Trasformazioni RGB
     rgb_transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=img_mean, std=img_std)
     ])
     
-    # 4. Carica Immagine RGB
+    # 5. Carica Immagine RGB
     img_bgr = cv2.imread(image_path)
     if img_bgr is None:
         raise FileNotFoundError(f"Image not found: {image_path}")
     img_rgb_pil = Image.open(image_path).convert("RGB")
     
-    # 5. Deduci Path Depth
+    # 6. Deduci Path Depth
     # Assumiamo struttura: data/XX/rgb/YYYY.png -> data/XX/depth/YYYY.png
     depth_path = image_path.replace("rgb", "depth")
     
-    # 6. Carica Ground Truth per confronto
+    # 7. Carica Ground Truth per confronto
     # Path: data/XX/rgb/YYYY.png -> data/XX_gt.yml
     import re
     match = re.search(r'data[\\/](\d+)[\\/]rgb[\\/](\d+)\.png', image_path)
@@ -116,7 +142,7 @@ def visualize_fusion_predictions(
     with open(gt_file, 'r') as f:
         gt_data_all = yaml.load(f, Loader=yaml.CLoader)
     
-    # 7. YOLO Inference
+    # 8. YOLO Inference
     results = yolo_model(image_path, verbose=False)
     
     print("\n" + "="*70)

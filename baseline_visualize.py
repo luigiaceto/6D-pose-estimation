@@ -24,7 +24,9 @@ from utils.visualization import draw_3d_bbox_colored, draw_axis_colored
 def visualize_baseline_predictions(
     dataset_root,
     cam_k,
-    image_path,
+    test_dataset=None,
+    sample_idx=None,
+    image_path=None,
     yolo_checkpoint=str(Path("checkpoints") / "best_yolo_model.pt"),
     pose_checkpoint=str(Path("checkpoints") / "best_pose_model.pt"),
     device='cuda',
@@ -34,15 +36,44 @@ def visualize_baseline_predictions(
 ):
     """
     Pipeline completa: YOLO -> Crop+Padding -> ResNet -> Visualizza GT e predizione con confronto numerico.
+    
+    Args:
+        test_dataset: Dataset di test per selezionare campioni validi
+        sample_idx: Indice specifico dal test set (se None, selezione casuale)
+        image_path: Path manuale dell'immagine (deprecato, usa test_dataset)
     """
     
-    # Load object diameters
+    # 1. Gestione Selezione Immagine dal Test Set
+    if test_dataset is not None:
+        test_samples = test_dataset.get_samples_id()
+        
+        if sample_idx is not None:
+            # Usa sample specifico dal test set
+            if sample_idx < 0 or sample_idx >= len(test_samples):
+                raise ValueError(f"sample_idx {sample_idx} fuori range. Test set ha {len(test_samples)} samples.")
+            folder_id, sample_id = test_samples[sample_idx]
+        else:
+            # Selezione casuale dal test set
+            folder_id, sample_id = test_samples[np.random.randint(len(test_samples))]
+        
+        image_path = str(dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png")
+        print(f"📊 Visualizzando sample dal TEST SET: folder {folder_id:02d}, image {sample_id:04d}")
+    
+    elif image_path is None:
+        raise ValueError("Devi fornire 'test_dataset' oppure 'image_path'.")
+    
+    else:
+        # Warning: path manuale
+        print("⚠️  ATTENZIONE: image_path fornito manualmente. Impossibile verificare se è nel test set.")
+        print("   Raccomandazione: usa 'test_dataset' per garantire selezione dal test set.")
+    
+    # 2. Load object diameters
     models_info_path = str(dataset_root / "models" / "models_info.yml")
     with open(models_info_path, 'r') as f:
         models_info = yaml.load(f, Loader=yaml.CLoader)
     object_diameters = {obj_id: info['diameter'] for obj_id, info in models_info.items()}
     
-    # Load models
+    # 3. Load models
     yolo_model = YOLO(yolo_checkpoint)
     
     checkpoint = torch.load(pose_checkpoint, map_location=device, weights_only=False)
@@ -50,10 +81,10 @@ def visualize_baseline_predictions(
     pose_model.load_state_dict(checkpoint['model_state_dict'])
     pose_model.eval()
     
-    # Pinhole camera
+    # 4. Pinhole camera
     pinhole = PinholeCamera(cam_k=cam_k)
     
-    # Image transforms
+    # 5. Image transforms
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(
@@ -62,7 +93,7 @@ def visualize_baseline_predictions(
         )
     ])
     
-    # Load image
+    # 6. Load image
     img = cv2.imread(image_path)
     if img is None:
         raise FileNotFoundError(f"Immagine non trovata: {image_path}")
@@ -83,7 +114,7 @@ def visualize_baseline_predictions(
     with open(gt_file, 'r') as f:
         gt_data = yaml.load(f, Loader=yaml.CLoader)
     
-    # YOLO detection
+    # 7. YOLO detection
     results = yolo_model(image_path, verbose=False)
     
     print("\n" + "="*70)
