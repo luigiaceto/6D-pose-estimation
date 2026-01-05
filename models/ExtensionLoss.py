@@ -103,5 +103,5 @@ class RGBDPoseLoss(nn.Module):
             # errori
             'trans_err_cm': trans_err_cm.detach(),
             'proj_err_px': proj_err_px.detach(),
-            'rot_err_asymm_deg': torch.tensor(rot_err_deg)
+            'rot_err_asymm_deg': rot_err_deg
         }
