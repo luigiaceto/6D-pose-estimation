@@ -47,7 +47,7 @@ def yolo_to_xyxy(yolo_box, img_width, img_height):
 def solve_translation_geometric_high_precision(cropped_depth, pred_uv, cam_k, bbox_center):
     """
     Calcola Tx, Ty, Tz leggendo la depth map alle coordinate predette (u,v).
-    Converte coordinate globali -> locali rispetto al crop per leggere la Z corretta.
+    Usa MEDIANA LOCALE 3x3 per robustezza contro buchi e rumore.
     
     Args:
         cropped_depth (Tensor): (B, 1, 224, 224) RAW Depth (mm o metri)
@@ -61,24 +61,47 @@ def solve_translation_geometric_high_precision(cropped_depth, pred_uv, cam_k, bb
     B, _, H, W = cropped_depth.shape
     
     # 1. Global to Local transformation
-    # Il centro del crop (W/2, H/2) corrisponde a bbox_center nel frame globale.
-    # u_local = (u_global - bbox_center_x) + W/2
     u_local = (pred_uv[:, 0] - bbox_center[:, 0]) + (W / 2)
     v_local = (pred_uv[:, 1] - bbox_center[:, 1]) + (H / 2)
     
-    # 2. Campionamento sicuro (Clamp nel range 0-223)
-    u_sample = torch.clamp(u_local.long(), 0, W-1)
-    v_sample = torch.clamp(v_local.long(), 0, H-1)
+    # 2. Creiamo griglia di offset 3x3 per il campionamento
+    # Offsets: (-1,-1), (-1,0), ..., (1,1)
+    kernel_size = 3
+    pad = kernel_size // 2
     
-    # 3. Lettura Z (vettorizzata)
-    idx = (v_sample * W) + u_sample
-    z_raw = cropped_depth.view(B, -1).gather(1, idx.unsqueeze(1)).squeeze(1)
+    # Clamping del centro per non uscire dai bordi col kernel
+    u_center = torch.clamp(u_local.long(), pad, W - 1 - pad)
+    v_center = torch.clamp(v_local.long(), pad, H - 1 - pad)
     
-    # 4. Gestione Unità (mm -> metri) se necessario
+    # Raccogliamo i vicini
+    z_samples = []
+    for dy in range(-pad, pad + 1):
+        for dx in range(-pad, pad + 1):
+            # Coordinate vicini
+            u_sample = torch.clamp(u_center + dx, 0, W-1)
+            v_sample = torch.clamp(v_center + dy, 0, H-1)
+            
+            # Indice linearizzato
+            idx = (v_sample * W) + u_sample
+            
+            # Gather z value
+            z_val = cropped_depth.view(B, -1).gather(1, idx.unsqueeze(1))
+            z_samples.append(z_val)
+            
+    # Stack -> (B, 9)
+    z_stack = torch.cat(z_samples, dim=1)
+    
+    # 3. Calcolo Mediana (robusta agli outlier/zeri)
+    # Nota: se ci sono molti zeri, la mediana potrebbe essere 0. 
+    # Idealmente filtreremmo i 0, ma la mediana su 3x3 è un buon compromesso veloce.
+    z_raw = torch.median(z_stack, dim=1).values
+    
+    # 4. Gestione Unità (mm -> metri) e Safety Clamp
+    # Se > 100 assumiamo mm.
     z_meters = torch.where(z_raw > 100.0, z_raw / 1000.0, z_raw)
-    z_meters = torch.clamp(z_meters, min=0.1)  # Safety clamp
+    z_meters = torch.clamp(z_meters, min=0.1) # Evita Z=0
     
-    # 5. Pinhole Inverse (Usa UV Globali qui!)
+    # 5. Pinhole Inverse
     fx, fy, cx, cy = cam_k[:, 0], cam_k[:, 1], cam_k[:, 2], cam_k[:, 3]
     tx = (pred_uv[:, 0] - cx) * z_meters / fx
     ty = (pred_uv[:, 1] - cy) * z_meters / fy
