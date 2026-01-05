@@ -22,6 +22,7 @@ def train_one_epoch(
     total_loss_sum = 0
     add_loss_sum = 0
     proj_loss_sum = 0
+    rot_loss_sum = 0  # ✅ AGGIUNTO
     trans_err_cm_sum = 0
     proj_err_px_sum = 0
     rot_err_asymm_deg_sum = 0
@@ -72,6 +73,7 @@ def train_one_epoch(
         'total_loss_avg': total_loss_sum / len(loader),
         'add_loss_avg': add_loss_sum / len(loader),
         'proj_loss_avg': proj_loss_sum / len(loader),
+        'rot_loss_avg': rot_loss_sum / len(loader),
         'trans_err_cm_avg': trans_err_cm_sum / len(loader),
         'proj_err_px_avg': proj_err_px_sum / len(loader),
         'rot_err_asymm_deg_avg': rot_err_asymm_deg_sum / len(loader)
@@ -334,13 +336,14 @@ def train(
         train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device)
         print(
             f"  Train Loss: {train_avg_metrics['total_loss_avg']:.4f}, ADD: {train_avg_metrics['add_loss_avg']:.2f}, Rot: {train_avg_metrics['rot_loss_avg']:.2f}, Proj: {train_avg_metrics['proj_loss_avg']:.2f} "
-            f"(Rot Err: {train_avg_metrics['rot_err_deg_avg']:.2f}°, Trans Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {train_avg_metrics['proj_err_px_avg']:.2f} px)"
+            f"(Rot Err: {train_avg_metrics['rot_err_asymm_deg_avg']:.2f}°, Trans Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {train_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
 
         val_avg_metrics = validate(model, val_loader, criterion, device)
+        
         print(
             f"  Val Loss: {val_avg_metrics['total_loss_avg']:.4f}, ADD: {val_avg_metrics['add_loss_avg']:.2f}, Rot: {val_avg_metrics['rot_loss_avg']:.2f}, Proj: {val_avg_metrics['proj_loss_avg']:.2f} "
-            f"(Rot Err: {val_avg_metrics['rot_err_deg_avg']:.2f}°, Trans Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
+            f"(Rot Err: {val_avg_metrics['rot_err_asymm_deg_avg']:.2f}°, Trans Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
 
         scheduler.step(val_avg_metrics['total_loss_avg'])
