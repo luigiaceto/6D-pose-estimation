@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 from models.TridentNetPose import TridentNetPose
 from models.ExtensionLoss import ExtensionLoss
-from utils.pose_utils import load_all_models_points
+from utils.pose_utils import load_all_models_points, solve_translation_geometric, solve_translation_geometric_high_precision
 
 
 def train_one_epoch(
@@ -46,11 +46,16 @@ def train_one_epoch(
         obj_id = batch['obj_id'].to(device, non_blocking=True).long()
         bbox_dims = batch['bbox_dims'].to(device, non_blocking=True)
         
+        # 🎯 SCALING DEPTH: CNN vuole valori piccoli (mm → m se necessario)
+        net_input_depth = cropped_depth.clone()
+        if net_input_depth.mean() > 10.0:
+            net_input_depth = net_input_depth / 1000.0
+        
         optimizer.zero_grad(set_to_none=True)
         
         with torch.amp.autocast(device_type='cuda', enabled=True):
             # forward
-            pred_quat, pred_trans, pred_2d = model(cropped_img, cropped_depth, bbox_center, bbox_dims)
+            pred_quat, pred_trans, pred_2d = model(cropped_img, net_input_depth, bbox_center, bbox_dims)
                 
             loss_dict = criterion(
                 pred_quat=pred_quat, 
@@ -119,16 +124,27 @@ def validate(
             cropped_depth = batch['cropped_depth'].to(device, non_blocking=True)
             obj_id = batch['obj_id'].to(device, non_blocking=True).long()
             bbox_dims = batch['bbox_dims'].to(device, non_blocking=True)
+            
+            # 🎯 SCALING DEPTH per la rete
+            net_depth = cropped_depth.clone()
+            net_depth = torch.where(net_depth > 100.0, net_depth / 1000.0, net_depth)
 
             with torch.amp.autocast(device_type='cuda', enabled=True):
-                pred_quat, pred_trans, pred_2d = model(cropped_img, cropped_depth, bbox_center, bbox_dims)
+                pred_quat, pred_trans_net, pred_uv = model(cropped_img, net_depth, bbox_center, bbox_dims)
+                
+                # 🎯 SOVRASCRIVI TRASLAZIONE CON SOLVER GEOMETRICO HIGH PRECISION
+                # Usa le coordinate (u,v) predette dalla rete + depth map RAW per calcolare traslazione esatta
+                cam_k_batch = criterion.cam_k.repeat(len(pred_quat), 1)
+                
+                # Usa depth RAW (non scalata) + bbox_center per conversione globale→locale
+                pred_trans = solve_translation_geometric_high_precision(cropped_depth, pred_uv, cam_k_batch, bbox_center)
                 
                 loss_dict = criterion(
                     pred_quat=pred_quat, 
                     pred_trans=pred_trans, 
                     gt_quat=gt_quaternion, 
                     gt_trans=gt_translation, 
-                    pred_2d=pred_2d,
+                    pred_2d=pred_uv,
                     class_ids=obj_id 
                 )
             
@@ -178,9 +194,9 @@ def train(
     ).to(device)
 
     criterion = ExtensionLoss(
-        add_weight=100.0,
-        proj_weight=0.2,
-        trans_weight=10.0,  # 🎯 HARDCODED: BOMBARDAMENTO TRANSLATION BOOSTER
+        add_weight=20.0,
+        proj_weight=2.0,     # 🎯 AUMENTATO: Focus su predizione precisa (u,v)
+        trans_weight=0.0,    # 🎯 DISABILITATO: Non impara più traslazione diretta (usa solver geometrico)
         cam_k=cam_k,
         model_points_dict=points_dict
     ).to(device)

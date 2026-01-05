@@ -43,6 +43,87 @@ def yolo_to_xyxy(yolo_box, img_width, img_height):
     y2 = (y_center + height/2) * img_height
     return [x1, y1, x2, y2]
 
+
+def solve_translation_geometric_high_precision(cropped_depth, pred_uv, cam_k, bbox_center):
+    """
+    Calcola Tx, Ty, Tz leggendo la depth map alle coordinate predette (u,v).
+    Converte coordinate globali -> locali rispetto al crop per leggere la Z corretta.
+    
+    Args:
+        cropped_depth (Tensor): (B, 1, 224, 224) RAW Depth (mm o metri)
+        pred_uv (Tensor): (B, 2) Global pixel coordinates predette dalla rete
+        cam_k (Tensor): (B, 4) Intrinseci [fx, fy, cx, cy]
+        bbox_center (Tensor): (B, 2) Centro del bbox usato per il crop (Global coords)
+    
+    Returns:
+        (B, 3) Traslazione [Tx, Ty, Tz] in metri
+    """
+    B, _, H, W = cropped_depth.shape
+    
+    # 1. Global to Local transformation
+    # Il centro del crop (W/2, H/2) corrisponde a bbox_center nel frame globale.
+    # u_local = (u_global - bbox_center_x) + W/2
+    u_local = (pred_uv[:, 0] - bbox_center[:, 0]) + (W / 2)
+    v_local = (pred_uv[:, 1] - bbox_center[:, 1]) + (H / 2)
+    
+    # 2. Campionamento sicuro (Clamp nel range 0-223)
+    u_sample = torch.clamp(u_local.long(), 0, W-1)
+    v_sample = torch.clamp(v_local.long(), 0, H-1)
+    
+    # 3. Lettura Z (vettorizzata)
+    idx = (v_sample * W) + u_sample
+    z_raw = cropped_depth.view(B, -1).gather(1, idx.unsqueeze(1)).squeeze(1)
+    
+    # 4. Gestione Unità (mm -> metri) se necessario
+    z_meters = torch.where(z_raw > 100.0, z_raw / 1000.0, z_raw)
+    z_meters = torch.clamp(z_meters, min=0.1)  # Safety clamp
+    
+    # 5. Pinhole Inverse (Usa UV Globali qui!)
+    fx, fy, cx, cy = cam_k[:, 0], cam_k[:, 1], cam_k[:, 2], cam_k[:, 3]
+    tx = (pred_uv[:, 0] - cx) * z_meters / fx
+    ty = (pred_uv[:, 1] - cy) * z_meters / fy
+    
+    return torch.stack([tx, ty, z_meters], dim=1)
+
+
+def solve_translation_geometric(cropped_depth, bbox_center, cam_k):
+    """
+    Calcola Tx, Ty, Tz usando Pinhole Inverse Projection dalla depth map.
+    La Z viene letta direttamente dal centro della depth map (mediana 5x5 per robustezza).
+    
+    Args:
+        cropped_depth: (B, 1, H, W) - Depth map croppata dall'oggetto
+        bbox_center: (B, 2) - Centro bbox in coordinate pixel [u, v]
+        cam_k: (B, 4) - Parametri intrinseci camera [fx, fy, cx, cy]
+    
+    Returns:
+        (B, 3) - Traslazione [Tx, Ty, Tz] in metri
+    """
+    device = cropped_depth.device
+    B, _, H, W = cropped_depth.shape
+    cy, cx = H // 2, W // 2
+    
+    # Prendi mediana 5x5 al centro per robustezza contro outlier
+    z_crop = cropped_depth[:, 0, cy-2:cy+3, cx-2:cx+3]
+    tz = z_crop.reshape(B, -1).median(dim=1).values
+    
+    # Gestione unità: se depth è in mm (valori > 100), converti in metri
+    mask_mm = (tz > 100.0)
+    tz[mask_mm] = tz[mask_mm] / 1000.0
+    
+    # Clamp per sicurezza (evita z=0 che causerebbe divisione per zero)
+    tz = torch.clamp(tz, min=0.1)
+    
+    # Back-projection: da pixel (u, v) + depth Z -> 3D (X, Y, Z)
+    fx, fy, cx_cam, cy_cam = cam_k[:, 0], cam_k[:, 1], cam_k[:, 2], cam_k[:, 3]
+    u, v = bbox_center[:, 0], bbox_center[:, 1]
+    
+    tx = (u - cx_cam) * tz / fx
+    ty = (v - cy_cam) * tz / fy
+    
+    return torch.stack([tx, ty, tz], dim=1)
+
+
 def quaternion_to_rotation_matrix(quaternion):
     """
     Converte quaternion (B, 4) a rotation matrix (B, 3, 3).

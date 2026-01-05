@@ -13,6 +13,8 @@ from utils.pose_utils import (
     batch_adds_loss,
     compute_rotation_error,
     compute_translation_error,
+    solve_translation_geometric,
+    solve_translation_geometric_high_precision,
     SYMMETRIC_OBJECTS
 )
 
@@ -63,9 +65,21 @@ def evaluate_extension_batch(
             gt_trans = batch['translation'].to(device)     # (B, 3)
             gt_rot_matrix = batch['rotation'].to(device)   # (B, 3, 3)
             obj_ids = batch['obj_id'].to(device)           # (B,)
+            
+            # 🎯 SCALING DEPTH per la rete
+            net_input_depth = depth.clone()
+            if net_input_depth.mean() > 10.0:
+                net_input_depth = net_input_depth / 1000.0
 
             # Forward
-            pred_quat, pred_trans, _ = model(rgb, depth, bbox_center, bbox_dims)
+            pred_quat, pred_trans_net, pred_uv = model(rgb, net_input_depth, bbox_center, bbox_dims)
+            
+            # 🎯 SOVRASCRIVI TRASLAZIONE CON SOLVER GEOMETRICO HIGH PRECISION
+            # Usa depth RAW (non scalata) + bbox_center per conversione globale→locale
+            cam_k_tensor = torch.tensor([cam_k[0], cam_k[4], cam_k[2], cam_k[5]], device=device).unsqueeze(0)
+            cam_k_batch = cam_k_tensor.repeat(len(pred_quat), 1)
+            pred_trans = solve_translation_geometric_high_precision(depth, pred_uv, cam_k_batch, bbox_center)
+            
             pred_rot_matrix = quaternion_to_rotation_matrix(pred_quat) # (B, 3, 3)
             
             # Costruiamo il tensore dei punti per questo batch specifico.
