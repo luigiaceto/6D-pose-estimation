@@ -29,7 +29,7 @@ class RGBDPoseLoss(nn.Module):
         loss_mode: 'add' (default, usa ADD+proj) o 'rotation' (usa rotation loss diretta)
     """
     
-    def __init__(self, add_weight, proj_weight, cam_k, model_points_dict, rot_weight=0.0, loss_mode='add'):
+    def __init__(self, add_weight, proj_weight, cam_k, model_points_dict, rot_weight=0.0, trans_weight=0.0, loss_mode='add'):
         super(RGBDPoseLoss, self).__init__()
 
         # Buffer per parametri camera
@@ -56,10 +56,12 @@ class RGBDPoseLoss(nn.Module):
         self.register_buffer('symmetry_lookup', symmetry_mask)
 
         self.proj_loss_fn = nn.MSELoss()
+        self.trans_loss_fn = nn.L1Loss()  # 🎯 TRANSLATION BOOSTER: L1 è brutale sui centimetri
 
         self.w_add = add_weight   
         self.w_proj = proj_weight
         self.w_rot = rot_weight
+        self.w_trans = trans_weight  # 🎯 PESO BOMBA SULLA TRASLAZIONE
         self.loss_mode = loss_mode
         
         if loss_mode not in ['add', 'rotation']:
@@ -103,8 +105,11 @@ class RGBDPoseLoss(nn.Module):
             loss_add = torch.mean(losses)
             loss_proj = self.proj_loss_fn(pred_2d, gt_2d_target)
             loss_rot = torch.tensor(0.0, device=pred_quat.device)  # Placeholder
+            
+            # 🎯 TRANSLATION LOSS DIRETTA (Bombardamento sui centimetri)
+            loss_trans_pure = self.trans_loss_fn(pred_trans, gt_trans)
 
-            total_loss = self.w_add * loss_add + self.w_proj * loss_proj
+            total_loss = self.w_add * loss_add + self.w_proj * loss_proj + self.w_trans * loss_trans_pure
         
         else:  # loss_mode == 'rotation'
             # ========== MODALITÀ ROTATION (Chirurgia Rotazione) ==========
@@ -140,8 +145,11 @@ class RGBDPoseLoss(nn.Module):
             
             loss_proj = torch.tensor(0.0, device=pred_quat.device)  # Non usata in questa modalità
             
-            # PRIORITÀ TOTALE SULLA ROTAZIONE
-            total_loss = self.w_add * loss_add + self.w_rot * loss_rot
+            # 🎯 TRANSLATION LOSS DIRETTA (anche in modalità rotation)
+            loss_trans_pure = self.trans_loss_fn(pred_trans, gt_trans)
+            
+            # PRIORITÀ TOTALE SULLA ROTAZIONE (o traslazione se w_trans > 0)
+            total_loss = self.w_add * loss_add + self.w_rot * loss_rot + self.w_trans * loss_trans_pure
         
         with torch.no_grad(): 
             trans_err_cm = torch.norm(pred_trans - gt_trans, p=2, dim=1).mean() * 100
@@ -154,6 +162,7 @@ class RGBDPoseLoss(nn.Module):
             'add_loss': loss_add.detach(),
             'proj_loss': loss_proj.detach(),
             'rot_loss': loss_rot.detach(),
+            'trans_loss': loss_trans_pure.detach(),  # 🎯 Loggiamo la trans loss
             # errori
             'trans_err_cm': trans_err_cm.detach(),
             'proj_err_px': proj_err_px.detach(),
