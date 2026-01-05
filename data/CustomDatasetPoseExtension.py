@@ -31,18 +31,13 @@ class RGBDDatasetPose(CustomDatasetPose):
 
         # in training applico data augmentation alla depth
         if self.split == 'train':
-            # CORREZIONE: Rimosso scale_factor che causava errore di scala nella traslazione
-            # Random Scale commentato - la depth deve rimanere in metri reali
-            # scale_factor = torch.empty(1).uniform_(0.90, 1.10).item()
-            # depth_tensor = depth_tensor * scale_factor
+            # Simula errori di calibrazione minimi e previene overfitting sui valori esatti
+            scale_factor = torch.empty(1).uniform_(0.99, 1.01).item()
+            depth_tensor = depth_tensor * scale_factor
 
             noise = torch.randn_like(depth_tensor) * 0.005 # +/- 5mm di rumore
             mask = torch.rand_like(depth_tensor) > 0.10 # 10% dei pixel persi
             depth_tensor = (depth_tensor + noise) * mask
-        
-        # CORREZIONE: Normalizzazione depth a range [-1, 1] per stabilità numerica
-        # Migliora la fusione con features RGB normalizzate
-        depth_tensor = (depth_tensor - 0.5) / 0.5
 
         depth_tensor = depth_tensor.unsqueeze(0) # Aggiungi canale: (1, 224, 224)
         

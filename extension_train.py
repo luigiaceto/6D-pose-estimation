@@ -2,10 +2,10 @@ from pathlib import Path
 import torch
 import torch.optim as optim
 from tqdm import tqdm
-import numpy as np
 
 from models.FusionPoseNet import FusionPoseNet
 from models.ExtensionLoss import RGBDPoseLoss
+from utils.pose_utils import load_all_models_points
 
 
 def train_one_epoch(
@@ -20,12 +20,13 @@ def train_one_epoch(
     model.train()
     
     total_loss_sum = 0
-    rotation_loss_sum = 0
-    rotation_error_deg_sum = 0  # Errore angolare reale in gradi
-    translation_error_cm_sum = 0
+    add_loss_sum = 0
+    proj_loss_sum = 0
+    trans_err_cm_sum = 0
     proj_err_px_sum = 0
+    rot_err_deg_sum = 0
     
-    pbar = tqdm(loader, desc="**Training**")
+    pbar = tqdm(loader, desc="** Training **")
     for batch in pbar:
         # Sposta dati su GPU
         cropped_img = batch['cropped_img'].to(device, non_blocking=True)
@@ -59,41 +60,43 @@ def train_one_epoch(
         scaler.step(optimizer)
         scaler.update()
         
-        # Calcolo errore angolare reale (geodesico)
-        with torch.no_grad():
-            dot_prod = torch.abs(torch.sum(pred_quat * gt_quaternion, dim=1))
-            dot_prod = torch.clamp(dot_prod, -1.0, 1.0)
-            angular_dist_rad = 2 * torch.acos(dot_prod)
-            angular_dist_deg = torch.rad2deg(angular_dist_rad).mean().item()
-        
         # logging
-        total_loss_sum += loss.item()
-        rotation_loss_sum += loss_dict['rot_loss'].item()
-        rotation_error_deg_sum += angular_dist_deg
-        translation_error_cm_sum += loss_dict['trans_err_cm'].item()
+        total_loss_sum += loss
+        add_loss_sum += loss_dict['add_loss'].item()
+        proj_loss_sum += loss_dict['proj_loss'].item()
+        trans_err_cm_sum += loss_dict['trans_err_cm'].item()
         proj_err_px_sum += loss_dict['proj_err_px'].item()
+        rot_err_deg_sum += loss_dict['rot_err_deg']
     
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
-        'rot_loss_avg': rotation_loss_sum / len(loader),
-        'rot_error_deg_avg': rotation_error_deg_sum / len(loader),  # Errore reale in gradi
-        'trans_err_cm_avg': translation_error_cm_sum / len(loader),
-        'proj_err_px_avg': proj_err_px_sum / len(loader)
+        'add_loss_avg': add_loss_sum / len(loader),
+        'proj_loss_avg': proj_loss_sum / len(loader),
+        'trans_err_cm_avg': trans_err_cm_sum / len(loader),
+        'proj_err_px_avg': proj_err_px_sum / len(loader),
+        'rot_err_deg_avg': rot_err_deg_sum / len(loader)
     }
 
     return avg_metrics
 
-def validate(model, loader, criterion, device):
+def validate(
+        model, 
+        loader, 
+        criterion, 
+        device
+    ):
+
     model.eval()
     
     total_loss_sum = 0
-    rotation_loss_sum = 0
-    rotation_error_deg_sum = 0  # Errore angolare reale in gradi
-    translation_error_cm_sum = 0
+    add_loss_sum = 0
+    proj_loss_sum = 0
+    trans_err_cm_sum = 0
     proj_err_px_sum = 0
+    rot_err_deg_sum = 0
     
     with torch.no_grad():
-        for batch in tqdm(loader, desc="**Validation**"):
+        for batch in tqdm(loader, desc="** Validation **"):
             cropped_img = batch['cropped_img'].to(device, non_blocking=True)
             gt_quaternion = batch['quaternion'].to(device, non_blocking=True)
             gt_translation = batch['translation'].to(device, non_blocking=True)
@@ -113,30 +116,28 @@ def validate(model, loader, criterion, device):
                     pred_2d=pred_2d,
                     class_ids=obj_id 
                 )
-                
-                # Calcolo errore angolare reale (geodesico)
-                dot_prod = torch.abs(torch.sum(pred_quat * gt_quaternion, dim=1))
-                dot_prod = torch.clamp(dot_prod, -1.0, 1.0)
-                angular_dist_rad = 2 * torch.acos(dot_prod)
-                angular_dist_deg = torch.rad2deg(angular_dist_rad).mean().item()
             
-            total_loss_sum += loss_dict['total_loss'].item()
-            rotation_loss_sum += loss_dict['rot_loss'].item()
-            rotation_error_deg_sum += angular_dist_deg
-            translation_error_cm_sum += loss_dict['trans_err_cm'].item()
+            # logging
+            total_loss_sum += loss_dict['total_loss']
+            add_loss_sum += loss_dict['add_loss'].item()
+            proj_loss_sum += loss_dict['proj_loss'].item()
+            trans_err_cm_sum += loss_dict['trans_err_cm'].item()
             proj_err_px_sum += loss_dict['proj_err_px'].item()
+            rot_err_deg_sum += loss_dict['rot_err_deg']
 
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
-        'rot_loss_avg': rotation_loss_sum / len(loader),
-        'rot_error_deg_avg': rotation_error_deg_sum / len(loader),  # Errore reale in gradi
-        'trans_err_cm_avg': translation_error_cm_sum / len(loader),
-        'proj_err_px_avg': proj_err_px_sum / len(loader)
+        'add_loss_avg': add_loss_sum / len(loader),
+        'proj_loss_avg': proj_loss_sum / len(loader),
+        'trans_err_cm_avg': trans_err_cm_sum / len(loader),
+        'proj_err_px_avg': proj_err_px_sum / len(loader),
+        'rot_err_deg_avg': rot_err_deg_sum / len(loader)
     }
 
     return avg_metrics
 
 def train(
+    dataset_root,
     train_loader,
     val_loader,
     cam_k,
@@ -151,12 +152,17 @@ def train(
     resume_from_checkpoint=None,
     reset_training=False
 ):
+    points_dict = load_all_models_points(dataset_root, num_points=1000)
+
     model = FusionPoseNet(
         cam_k=cam_k
     ).to(device)
 
     criterion = RGBDPoseLoss(
-        cam_k=cam_k
+        add_weight=100.0,
+        proj_weight=0.2,
+        cam_k=cam_k,
+        model_points_dict=points_dict
     ).to(device)
 
     params = [
@@ -171,9 +177,6 @@ def train(
         {'params': model.rot_head.parameters(), 'lr': lr_new_components},
         {'params': model.z_head.parameters(), 'lr': lr_new_components},      # Testa per Z (metri)
         {'params': model.offset_head.parameters(), 'lr': lr_new_components}, # Testa per Offset (pixel)
-
-        # Gruppo 4: Parametri Learnable della Loss (s_rot, s_trans, s_proj)
-        {'params': criterion.parameters(), 'lr': lr_new_components}
     ]
 
     optimizer = optim.AdamW(
@@ -181,13 +184,21 @@ def train(
         weight_decay=weight_decay
     )
     
+    # IMPORTANTE SETTARLO BENE
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, 
         mode='min',
-        factor=0.5,
-        patience=10,
-        min_lr=1e-7,
-        # verbose=True # disabilitare per colab
+        factor=0.1,     # quando si attiva new_lr = lr * 0.1
+        patience=10,    # se per X epoche non viene battuta la loss migliore, si attiva
+        min_lr=[
+            1e-8,       # RGB Backbone (deve poter scendere molto)
+            1e-7,       # Depth Backbone
+            1e-7,       # Fusion FC
+            1e-7,       # Rot Head
+            1e-7,       # Z Head
+            1e-7        # Offset Head
+        ],
+        verbose=True
     )
 
     scaler = torch.amp.GradScaler('cuda', enabled=True)
@@ -230,8 +241,8 @@ def train(
     
     print("Mixed Precision (AMP): ENABLED")
 
-    # Freeze iniziale RGB (Transfer Learning)
     model.freeze_rgb()
+    already_unfreezed = False # serve per evitare inconsistenze durante l'unfreezing partendo da un checkpoint
     
     for epoch in range(start_epoch, epochs):
         print(f"\nEpoch {epoch+1}/{epochs}")
@@ -255,16 +266,16 @@ def train(
             
         train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device)
         print(
-            f"  Train Loss: {train_avg_metrics['total_loss_avg']:.4f} "
-            f"(Rot: {train_avg_metrics['rot_error_deg_avg']:.2f}°, Trans: {train_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj: {train_avg_metrics['proj_err_px_avg']:.2f} px)"
+            f"  Train Loss: {train_avg_metrics['total_loss_avg']:.4f}, ADD Loss: {train_avg_metrics['add_loss_avg']}, Proj Loss: {train_avg_metrics['proj_loss_avg']}"
+            f"(Rot Err: {train_avg_metrics['rot_err_deg_avg']:.2f}°, Trans Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {train_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
 
         val_avg_metrics = validate(model, val_loader, criterion, device)
         print(
-            f"  Val Loss: {val_avg_metrics['total_loss_avg']:.4f} "
-            f"(Rot: {val_avg_metrics['rot_error_deg_avg']:.2f}°, Trans: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
+            f"  Train Loss: {val_avg_metrics['total_loss_avg']:.4f}, ADD Loss: {val_avg_metrics['add_loss_avg']}, Proj Loss: {val_avg_metrics['proj_loss_avg']}"
+            f"(Rot Err: {val_avg_metrics['rot_err_deg_avg']:.2f}°, Trans Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
-        
+
         scheduler.step(val_avg_metrics['total_loss_avg'])
 
         if val_avg_metrics['total_loss_avg'] < best_loss:
@@ -281,7 +292,7 @@ def train(
             
             save_path = str(Path(checkpoint_dir) / "best_fusion_model.pt")
             torch.save(checkpoint_dict, save_path)
-            print(f"✓ Checkpoint salvato: {save_path} (Loss: {best_loss:.4f})")
+            print(f"✅ Checkpoint salvato: {save_path} (Loss: {best_loss:.4f})")
         print()
     
     print("\nTraining completed!")

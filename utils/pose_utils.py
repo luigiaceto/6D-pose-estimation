@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import numpy as np
 import yaml
 import pandas as pd
+import trimesh
 
 IMG_WIDTH = 640
 IMG_HEIGHT = 480
@@ -275,3 +276,115 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
         df.to_csv(table_path, index=False)
         print(f"Saved CSV to {table_path}")
     return df
+
+# USATE DALLA ADD-Loss
+
+def batch_add_loss(pred_R, pred_t, gt_R, gt_t, points):
+    """
+    Calcola ADD loss (Asymmetric) per un batch.
+    
+    Args:
+        pred_R, gt_R: (B, 3, 3)
+        pred_t, gt_t: (B, 3, 1)
+        points: (B, N, 3) - I punti del modello specifici per ogni oggetto nel batch
+    """
+    # Trasponiamo i punti per la moltiplicazione matriciale: (B, 3, N)
+    points_t = points.transpose(1, 2)
+    
+    # Applicazione trasformazione: R * p + t
+    # Broadcasting automatico di t su N punti
+    pred_pts = torch.bmm(pred_R, points_t) + pred_t # (B, 3, N)
+    gt_pts = torch.bmm(gt_R, points_t) + gt_t       # (B, 3, N)
+    
+    # Calcolo distanza Euclidea media per ogni oggetto nel batch
+    # norm su dim=1 (x,y,z), mean su dim=2 (punti)
+    dist = torch.norm(pred_pts - gt_pts, dim=1) # (B, N)
+    return torch.mean(dist, dim=1) # (B,) Loss per ogni elemento del batch
+
+def batch_adds_loss(pred_R, pred_t, gt_R, gt_t, points):
+    """
+    Calcola ADD-S loss (Symmetric) usando Nearest Neighbor.
+    """
+    points_t = points.transpose(1, 2)
+    pred_pts = torch.bmm(pred_R, points_t) + pred_t # (B, 3, N)
+    gt_pts = torch.bmm(gt_R, points_t) + gt_t       # (B, 3, N)
+    
+    # Preparazione per cdist: servono shape (B, N, 3)
+    pred_pts = pred_pts.permute(0, 2, 1)
+    gt_pts = gt_pts.permute(0, 2, 1)
+    
+    # Matrice distanze pairwise (B, N, N)
+    # Calcola la distanza tra OGNI punto predetto e OGNI punto GT
+    dist_matrix = torch.cdist(pred_pts, gt_pts, p=2) 
+    
+    # Per ogni punto predetto, troviamo il minimo nel GT (Nearest Neighbor)
+    min_dists, _ = torch.min(dist_matrix, dim=2) # (B, N)
+    
+    return torch.mean(min_dists, dim=1) # (B,)
+
+def load_all_models_points(dataset_root, num_points=1000):
+    """
+    Carica i modelli 3D dal disco, li campiona e li restituisce in un dizionario.
+    Normalizza da millimetri a METRI se necessario.
+    """
+    cache = {}
+    models_dir = dataset_root / "models"
+    
+    obj_ids = [1, 2, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]
+    
+    print(f"⏳ Preloading 3D models from {models_dir}...")
+    
+    for obj_id in obj_ids:
+        ply_path = models_dir / f"obj_{obj_id:02d}.ply"
+        
+        if ply_path.exists():
+            mesh = trimesh.load(str(ply_path))
+            vertices = np.array(mesh.vertices)
+            
+            # Farthest Point Sampling o Random
+            if len(vertices) >= num_points:
+                idxs = np.random.choice(len(vertices), num_points, replace=False)
+            else:
+                idxs = np.random.choice(len(vertices), num_points, replace=True)
+            
+            sampled_points = vertices[idxs]
+            
+            # LineMOD .ply sono in mm. Converto quindi in m
+            tensor_points = torch.tensor(sampled_points, dtype=torch.float32) / 1000.0
+            
+            cache[obj_id] = tensor_points
+        else:
+            print(f"⚠️ Warning: Model {ply_path} not found.")
+            
+    print(f"✅ Loaded {len(cache)} models.")
+    return cache
+
+def compute_batch_rotation_error(pred_quat, gt_quat):
+    """
+    Calcola l'errore medio di rotazione in gradi per un batch di quaternioni.
+    Gestisce l'ambiguità q = -q e la stabilità numerica.
+    
+    Args:
+        pred_quat: (B, 4) tensor
+        gt_quat: (B, 4) tensor
+        
+    Returns:
+        float: Errore medio in gradi
+    """
+    with torch.no_grad():
+        # Assicuriamoci che siano normalizzati (sicurezza extra)
+        pred_q = F.normalize(pred_quat, p=2, dim=1)
+        gt_q = F.normalize(gt_quat, p=2, dim=1)
+        
+        # Dot product assoluto per gestire la doppia copertura (q e -q sono uguali)
+        dot_prod = torch.abs(torch.sum(pred_q * gt_q, dim=1))
+        
+        # Clamping per evitare NaN dovuti a errori numerici (es. 1.0000001)
+        dot_prod = torch.clamp(dot_prod, -1.0, 1.0)
+        
+        # Formula: theta = 2 * acos(|<q1, q2>|)
+        angular_dist_rad = 2 * torch.acos(dot_prod)
+        
+        # Conversione in gradi e media sul batch
+        return torch.rad2deg(angular_dist_rad).mean().item()
+    

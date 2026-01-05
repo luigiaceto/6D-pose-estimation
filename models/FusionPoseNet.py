@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import torchvision.models as models
 from models.PinholeCamera import PinholeCamera
 
+
 class DepthEncoder(nn.Module):
     """
     CNN semplice per estrarre features dalla depth map (1 canale).
@@ -84,6 +85,7 @@ class FusionPoseNet(nn.Module):
             nn.Linear(1024, 128),
             nn.ReLU(),
             nn.Dropout(0.2),
+            nn.Dropout(0.2),
             nn.Linear(128, 1) # Output: Z (metri)
         )
 
@@ -111,7 +113,7 @@ class FusionPoseNet(nn.Module):
         
         # Per la rotazione, inizializzazione specifica
         nn.init.xavier_uniform_(self.rot_head.weight, gain=0.01)
-        nn.init.constant_(self.z_head[3].bias, -0.35) # inizializzo a distanza circa 70cm ???
+        nn.init.constant_(self.z_head[-1].bias, -0.35) # inizializzo a distanza circa 70cm ???
 
         with torch.no_grad():
             self.rot_head.bias.fill_(0)
@@ -173,11 +175,13 @@ class FusionPoseNet(nn.Module):
                 - If True, unfreezes only layer4 (last residual block).
                 - If False, unfreezes all layers.
         """
+
+        # ResNet structure: conv1, bn1, relu, maxpool, layer1, layer2, layer3, layer4, avgpool
         if partial:
-            # Sblocca solo layer4 (indice 7 nella Sequential)
-            # ResNet structure: conv1, bn1, relu, maxpool, layer1, layer2, layer3, layer4, avgpool
-            for param in self.rgb_backbone[7].parameters():
+            # Sblocca solo layer4 (ultimo blocco convoluzionale)
+            for param in self.rgb_backbone[-2].parameters():
                 param.requires_grad = True
         else:
+            # Sblocca tutta la ResNet
             for param in self.rgb_backbone.parameters():
                 param.requires_grad = True
