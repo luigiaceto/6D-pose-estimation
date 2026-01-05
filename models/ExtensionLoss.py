@@ -38,19 +38,22 @@ class RGBDPoseLoss(nn.Module):
             (torch.tensor([cam_k[0], cam_k[4], cam_k[2], cam_k[5]])).view(1, 4)
         )
         
-        # Creiamo un unico tensore che contiene i punti di TUTTI gli oggetti.
-        # Shape: (MAX_ID + 1, Num_Points, 3)
+        # --- VETTORE MAPPA DI MODELLI 3D ---
         max_id = max(model_points_dict.keys())
-        # Assumiamo tutti abbiano lo stesso numero di punti (es. 1000)
+        # tutti agli oggetti hanno lo stesso numero di punti (es. 1000)
         n_pts = list(model_points_dict.values())[0].shape[0]
-            
-        bank = torch.zeros((max_id + 1, n_pts, 3), dtype=torch.float32)
-            
-        for oid, pts in model_points_dict.items():
+        bank = torch.zeros((max_id + 1, n_pts, 3), dtype=torch.float32) # vettore dim 16 (da 0 a 15)
+        for oid, pts in model_points_dict.items(): # riempio solo gli indici corrispondenti ad ID (1, 2, 4, 5, ...)
             bank[oid] = pts
-            
-        # register_buffer sposta automaticamente questo tensore su GPU insieme al modello
         self.register_buffer('model_points_bank', bank)
+    
+        # --- VETTORE MASCHERA DI OGGETTI SIMMETRICI ---
+        max_id = max(model_points_dict.keys())
+        symmetry_mask = torch.zeros(max_id + 1, dtype=torch.bool)
+        for obj_id in SYMMETRIC_OBJECTS:
+            if obj_id <= max_id:
+                symmetry_mask[obj_id] = True
+        self.register_buffer('symmetry_lookup', symmetry_mask)
 
         self.proj_loss_fn = nn.MSELoss()
 
@@ -143,7 +146,7 @@ class RGBDPoseLoss(nn.Module):
         with torch.no_grad(): 
             trans_err_cm = torch.norm(pred_trans - gt_trans, p=2, dim=1).mean() * 100
             proj_err_px = torch.norm(pred_2d - gt_2d_target, p=2, dim=1).mean()
-            rot_err_deg = compute_batch_rotation_error(pred_quat, gt_quat)
+            rot_err_deg = compute_batch_rotation_error_asymm(pred_quat, gt_quat, class_ids, self.symmetry_lookup)
         
         return {
             # loss
@@ -154,5 +157,5 @@ class RGBDPoseLoss(nn.Module):
             # errori
             'trans_err_cm': trans_err_cm.detach(),
             'proj_err_px': proj_err_px.detach(),
-            'rot_err_deg': torch.tensor(rot_err_deg)
+            'rot_err_asymm_deg': rot_err_deg
         }

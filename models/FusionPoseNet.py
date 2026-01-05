@@ -112,7 +112,7 @@ class FusionPoseNet(nn.Module):
         
         # Per la rotazione, inizializzazione specifica
         nn.init.xavier_uniform_(self.rot_head.weight, gain=0.01)
-        nn.init.constant_(self.z_head[-1].bias, -0.35) # inizializzo a distanza circa 70cm ???
+        nn.init.constant_(self.z_head[-1].bias, -0.35) # inizializzo a distanza circa 70cm
 
         with torch.no_grad():
             self.rot_head.bias.fill_(0)

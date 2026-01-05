@@ -10,15 +10,7 @@ IMG_HEIGHT = 480
 
 SYMMETRIC_OBJECTS = [10, 11]
 
-# 1. Nomi per visualizzazione umana
-LINEMOD_OBJECT_NAMES = {
-    1: "ape", 2: "benchvise", 4: "camera", 5: "can", 6: "cat",
-    8: "driller", 9: "duck", 10: "eggbox", 11: "glue",
-    12: "holepuncher", 13: "iron", 14: "lamp", 15: "phone",
-    "MEAN": "MEAN"
-}
-
-# 2. Traduzione da YOLO (0,1,2...) a LINEMOD (1,2,4...)
+# Traduzione da YOLO (0,1,2...) a LINEMOD (1,2,4...)
 YOLO_TO_LINEMOD_MAP = {
     0: 1,  
     1: 2,  
@@ -33,6 +25,13 @@ YOLO_TO_LINEMOD_MAP = {
     10: 13,
     11: 14,
     12: 15 
+}
+
+LINEMOD_OBJECT_NAMES = {
+    1: "ape", 2: "benchvise", 4: "camera", 5: "can", 6: "cat",
+    8: "driller", 9: "duck", 10: "eggbox", 11: "glue",
+    12: "holepuncher", 13: "iron", 14: "lamp", 15: "phone",
+    "MEAN": "MEAN"
 }
 
 def yolo_to_xyxy(yolo_box, img_width, img_height):
@@ -51,9 +50,7 @@ def quaternion_to_rotation_matrix(quaternion):
     """
     # Normalizza per sicurezza (eps evita divisioni per zero)
     quaternion = F.normalize(quaternion, p=2, dim=1, eps=1e-8)
-    
     w, x, y, z = quaternion[:, 0], quaternion[:, 1], quaternion[:, 2], quaternion[:, 3]
-    
     batch_size = quaternion.shape[0]
     R = torch.zeros(batch_size, 3, 3, device=quaternion.device, dtype=quaternion.dtype)
     
@@ -82,12 +79,10 @@ def compute_quaternion_loss(q1, q2):
         # Normalize con epsilon sicuro
         q1 = F.normalize(q1, p=2, dim=1, eps=1e-6)
         q2 = F.normalize(q2, p=2, dim=1, eps=1e-6)
-        
         # Dot product con abs per gestire q = -q
         dot = torch.abs(torch.sum(q1 * q2, dim=1))
         # Clamp per sicurezza (non dovrebbe servire con abs)
         dot = torch.clamp(dot, 0.0, 1.0)
-        
         return torch.mean(1.0 - dot)
     
 def compute_matrix_geodesic_loss(pred_quat, gt_quat):
@@ -248,12 +243,10 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
         columns={
             'object_name': 'Object Name',
             'num_samples': '#Samples',
-            'accuracy_10p': 'Accuracy @10% (%)',
-            'add_r_accuracy_10p': 'ADD-R Accuracy @10% (%)',
             'rot_mean': 'Rotation Error (deg)',
             'trans_mean': 'Translation Error (cm)',
-            'add_mean': 'ADD / ADD-S (cm)',
-            'add_rot_only_mean': 'ADD-R (cm)'
+            'add_mean': 'ADD(-S) (cm)',
+            'accuracy_10p': 'Accuracy @10% (%)'
         }
     )
 
@@ -261,12 +254,10 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
         [
             'Object Name',
             '#Samples',
-            'Accuracy @10% (%)',
-            'ADD-R Accuracy @10% (%)',
             'Rotation Error (deg)',
             'Translation Error (cm)',
-            'ADD / ADD-S (cm)',
-            'ADD-R (cm)'
+            'ADD(-S) (cm)',
+            'Accuracy @10% (%)'
         ]
     ]
 
@@ -278,7 +269,6 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
     return df
 
 # USATE DALLA ADD-Loss
-
 def batch_add_loss(pred_R, pred_t, gt_R, gt_t, points):
     """
     Calcola ADD loss (Asymmetric) per un batch.
@@ -359,32 +349,30 @@ def load_all_models_points(dataset_root, num_points=1000):
     print(f"✅ Loaded {len(cache)} models.")
     return cache
 
-def compute_batch_rotation_error(pred_quat, gt_quat):
+def compute_batch_rotation_error_asymm(pred_quat, gt_quat, class_ids, symmetry_lookup):
     """
     Calcola l'errore medio di rotazione in gradi per un batch di quaternioni.
     Gestisce l'ambiguità q = -q e la stabilità numerica.
-    
-    Args:
-        pred_quat: (B, 4) tensor
-        gt_quat: (B, 4) tensor
-        
-    Returns:
-        float: Errore medio in gradi
     """
+    
+    is_sym = symmetry_lookup[class_ids.long()]
+    mask = ~is_sym
+    pred_quat = pred_quat[mask]
+    gt_quat = gt_quat[mask]
+
+    if pred_quat.numel() == 0:
+        return torch.tensor(0.0, device=pred_quat.device)
+
     with torch.no_grad():
-        # Assicuriamoci che siano normalizzati (sicurezza extra)
         pred_q = F.normalize(pred_quat, p=2, dim=1)
         gt_q = F.normalize(gt_quat, p=2, dim=1)
         
-        # Dot product assoluto per gestire la doppia copertura (q e -q sono uguali)
+        # Dot product assoluto (q == -q)
         dot_prod = torch.abs(torch.sum(pred_q * gt_q, dim=1))
-        
-        # Clamping per evitare NaN dovuti a errori numerici (es. 1.0000001)
         dot_prod = torch.clamp(dot_prod, -1.0, 1.0)
         
-        # Formula: theta = 2 * acos(|<q1, q2>|)
         angular_dist_rad = 2 * torch.acos(dot_prod)
         
-        # Conversione in gradi e media sul batch
-        return torch.rad2deg(angular_dist_rad).mean().item()
+        # Ritorniamo il tensore (NO .item())
+        return torch.rad2deg(angular_dist_rad).mean()
     

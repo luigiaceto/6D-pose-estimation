@@ -24,11 +24,10 @@ def train_one_epoch(
     proj_loss_sum = 0
     trans_err_cm_sum = 0
     proj_err_px_sum = 0
-    rot_err_deg_sum = 0
+    rot_err_asymm_deg_sum = 0
     
     pbar = tqdm(loader, desc="** Training **")
     for batch in pbar:
-        # Sposta dati su GPU
         cropped_img = batch['cropped_img'].to(device, non_blocking=True)
         gt_quaternion = batch['quaternion'].to(device, non_blocking=True)
         gt_translation = batch['translation'].to(device, non_blocking=True)
@@ -67,7 +66,7 @@ def train_one_epoch(
         rot_loss_sum += loss_dict['rot_loss'].item()
         trans_err_cm_sum += loss_dict['trans_err_cm'].item()
         proj_err_px_sum += loss_dict['proj_err_px'].item()
-        rot_err_deg_sum += loss_dict['rot_err_deg']
+        rot_err_asymm_deg_sum += loss_dict['rot_err_asymm_deg']
     
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
@@ -75,7 +74,7 @@ def train_one_epoch(
         'proj_loss_avg': proj_loss_sum / len(loader),
         'trans_err_cm_avg': trans_err_cm_sum / len(loader),
         'proj_err_px_avg': proj_err_px_sum / len(loader),
-        'rot_err_deg_avg': rot_err_deg_sum / len(loader)
+        'rot_err_asymm_deg_avg': rot_err_asymm_deg_sum / len(loader)
     }
 
     return avg_metrics
@@ -95,7 +94,7 @@ def validate(
     rot_loss_sum = 0
     trans_err_cm_sum = 0
     proj_err_px_sum = 0
-    rot_err_deg_sum = 0
+    rot_err_asymm_deg_sum = 0
     
     with torch.no_grad():
         for batch in tqdm(loader, desc="** Validation **"):
@@ -126,7 +125,7 @@ def validate(
             rot_loss_sum += loss_dict['rot_loss'].item()
             trans_err_cm_sum += loss_dict['trans_err_cm'].item()
             proj_err_px_sum += loss_dict['proj_err_px'].item()
-            rot_err_deg_sum += loss_dict['rot_err_deg']
+            rot_err_asymm_deg_sum += loss_dict['rot_err_asymm_deg']
 
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
@@ -135,7 +134,7 @@ def validate(
         'rot_loss_avg': rot_loss_sum / len(loader),
         'trans_err_cm_avg': trans_err_cm_sum / len(loader),
         'proj_err_px_avg': proj_err_px_sum / len(loader),
-        'rot_err_deg_avg': rot_err_deg_sum / len(loader)
+        'rot_err_asymm_deg_avg': rot_err_asymm_deg_sum / len(loader)
     }
 
     return avg_metrics
@@ -273,7 +272,6 @@ def train(
     start_epoch = 0
     best_loss = float('inf')
     
-    # Resume from checkpoint se fornito
     if resume_from_checkpoint is not None:
         print(f"Loading checkpoint from {resume_from_checkpoint}")
         checkpoint = torch.load(resume_from_checkpoint, map_location=device)
