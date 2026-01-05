@@ -10,15 +10,7 @@ IMG_HEIGHT = 480
 
 SYMMETRIC_OBJECTS = [10, 11]
 
-# 1. Nomi per visualizzazione umana
-LINEMOD_OBJECT_NAMES = {
-    1: "ape", 2: "benchvise", 4: "camera", 5: "can", 6: "cat",
-    8: "driller", 9: "duck", 10: "eggbox", 11: "glue",
-    12: "holepuncher", 13: "iron", 14: "lamp", 15: "phone",
-    "MEAN": "MEAN"
-}
-
-# 2. Traduzione da YOLO (0,1,2...) a LINEMOD (1,2,4...)
+# Traduzione da YOLO (0,1,2...) a LINEMOD (1,2,4...)
 YOLO_TO_LINEMOD_MAP = {
     0: 1,  
     1: 2,  
@@ -33,6 +25,13 @@ YOLO_TO_LINEMOD_MAP = {
     10: 13,
     11: 14,
     12: 15 
+}
+
+LINEMOD_OBJECT_NAMES = {
+    1: "ape", 2: "benchvise", 4: "camera", 5: "can", 6: "cat",
+    8: "driller", 9: "duck", 10: "eggbox", 11: "glue",
+    12: "holepuncher", 13: "iron", 14: "lamp", 15: "phone",
+    "MEAN": "MEAN"
 }
 
 def yolo_to_xyxy(yolo_box, img_width, img_height):
@@ -359,32 +358,30 @@ def load_all_models_points(dataset_root, num_points=1000):
     print(f"✅ Loaded {len(cache)} models.")
     return cache
 
-def compute_batch_rotation_error(pred_quat, gt_quat):
+def compute_batch_rotation_error_asymm(pred_quat, gt_quat, class_ids, symmetry_lookup):
     """
     Calcola l'errore medio di rotazione in gradi per un batch di quaternioni.
     Gestisce l'ambiguità q = -q e la stabilità numerica.
-    
-    Args:
-        pred_quat: (B, 4) tensor
-        gt_quat: (B, 4) tensor
-        
-    Returns:
-        float: Errore medio in gradi
     """
+    
+    is_sym = symmetry_lookup[class_ids.long()]
+    mask = ~is_sym
+    pred_quat = pred_quat[mask]
+    gt_quat = gt_quat[mask]
+
+    if pred_quat.numel() == 0:
+        return torch.tensor(0.0, device=pred_quat.device)
+
     with torch.no_grad():
-        # Assicuriamoci che siano normalizzati (sicurezza extra)
         pred_q = F.normalize(pred_quat, p=2, dim=1)
         gt_q = F.normalize(gt_quat, p=2, dim=1)
         
-        # Dot product assoluto per gestire la doppia copertura (q e -q sono uguali)
+        # Dot product assoluto (q == -q)
         dot_prod = torch.abs(torch.sum(pred_q * gt_q, dim=1))
-        
-        # Clamping per evitare NaN dovuti a errori numerici (es. 1.0000001)
         dot_prod = torch.clamp(dot_prod, -1.0, 1.0)
         
-        # Formula: theta = 2 * acos(|<q1, q2>|)
         angular_dist_rad = 2 * torch.acos(dot_prod)
         
-        # Conversione in gradi e media sul batch
-        return torch.rad2deg(angular_dist_rad).mean().item()
+        # Ritorniamo il tensore (NO .item())
+        return torch.rad2deg(angular_dist_rad).mean()
     

@@ -24,7 +24,7 @@ def train_one_epoch(
     proj_loss_sum = 0
     trans_err_cm_sum = 0
     proj_err_px_sum = 0
-    rot_err_deg_sum = 0
+    rot_err_asymm_deg_sum = 0
     
     pbar = tqdm(loader, desc="** Training **")
     for batch in pbar:
@@ -66,7 +66,7 @@ def train_one_epoch(
         proj_loss_sum += loss_dict['proj_loss'].item()
         trans_err_cm_sum += loss_dict['trans_err_cm'].item()
         proj_err_px_sum += loss_dict['proj_err_px'].item()
-        rot_err_deg_sum += loss_dict['rot_err_deg']
+        rot_err_asymm_deg_sum += loss_dict['rot_err_deg']
     
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
@@ -74,7 +74,7 @@ def train_one_epoch(
         'proj_loss_avg': proj_loss_sum / len(loader),
         'trans_err_cm_avg': trans_err_cm_sum / len(loader),
         'proj_err_px_avg': proj_err_px_sum / len(loader),
-        'rot_err_deg_avg': rot_err_deg_sum / len(loader)
+        'rot_err_asymm_deg_avg': rot_err_asymm_deg_sum / len(loader)
     }
 
     return avg_metrics
@@ -93,7 +93,7 @@ def validate(
     proj_loss_sum = 0
     trans_err_cm_sum = 0
     proj_err_px_sum = 0
-    rot_err_deg_sum = 0
+    rot_err_asymm_deg_sum = 0
     
     with torch.no_grad():
         for batch in tqdm(loader, desc="** Validation **"):
@@ -123,7 +123,7 @@ def validate(
             proj_loss_sum += loss_dict['proj_loss'].item()
             trans_err_cm_sum += loss_dict['trans_err_cm'].item()
             proj_err_px_sum += loss_dict['proj_err_px'].item()
-            rot_err_deg_sum += loss_dict['rot_err_deg']
+            rot_err_asymm_deg_sum += loss_dict['rot_err_deg']
 
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
@@ -131,7 +131,7 @@ def validate(
         'proj_loss_avg': proj_loss_sum / len(loader),
         'trans_err_cm_avg': trans_err_cm_sum / len(loader),
         'proj_err_px_avg': proj_err_px_sum / len(loader),
-        'rot_err_deg_avg': rot_err_deg_sum / len(loader)
+        'rot_err_asymm_deg_avg': rot_err_asymm_deg_sum / len(loader)
     }
 
     return avg_metrics
@@ -237,6 +237,7 @@ def train(
 
         if epoch >= freeze_rgb_epochs and already_unfreezed == False:
             model.unfreeze_rgb(partial=partial_unfreeze)
+            already_unfreezed = True
 
             optimizer.param_groups[0]['lr'] = lr_rgb_backbone # altrimenti viene dimezzato il learning rate della ResNet, nonostante non sia mai stato usato
             if partial_unfreeze:
@@ -247,13 +248,13 @@ def train(
         train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device)
         print(
             f"  Train Loss: {train_avg_metrics['total_loss_avg']:.4f}, ADD Loss: {train_avg_metrics['add_loss_avg']}, Proj Loss: {train_avg_metrics['proj_loss_avg']}"
-            f"(Rot Err: {train_avg_metrics['rot_err_deg_avg']:.2f}°, Trans Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {train_avg_metrics['proj_err_px_avg']:.2f} px)"
+            f"(Rot Err Asymm: {train_avg_metrics['rot_err_asymm_deg_avg']:.2f}°, Trans Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {train_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
 
         val_avg_metrics = validate(model, val_loader, criterion, device)
         print(
             f"  Train Loss: {val_avg_metrics['total_loss_avg']:.4f}, ADD Loss: {val_avg_metrics['add_loss_avg']}, Proj Loss: {val_avg_metrics['proj_loss_avg']}"
-            f"(Rot Err: {val_avg_metrics['rot_err_deg_avg']:.2f}°, Trans Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
+            f"(Rot Err Asymm: {val_avg_metrics['rot_err_asymm_deg_avg']:.2f}°, Trans Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm, Proj Err: {val_avg_metrics['proj_err_px_avg']:.2f} px)"
         )
 
         scheduler.step(val_avg_metrics['total_loss_avg'])
