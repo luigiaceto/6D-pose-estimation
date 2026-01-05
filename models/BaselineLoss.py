@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 from utils.pose_utils import compute_matrix_geodesic_loss, compute_quaternion_loss,  SYMMETRIC_OBJECTS
 
-class PoseLoss(nn.Module):
+
+class BaselineLoss(nn.Module):
     """
     Loss per 6D pose estimation con supporto per oggetti simmetrici.
     
@@ -17,7 +18,7 @@ class PoseLoss(nn.Module):
     """
     
     def __init__(self, lambda_rotation=1.0, lambda_translation=0.0):
-        super(PoseLoss, self).__init__()
+        super(BaselineLoss, self).__init__()
         self.lambda_rotation = lambda_rotation
         self.lambda_translation = lambda_translation
     
@@ -71,3 +72,4 @@ class PoseLoss(nn.Module):
             'rotation_loss': rot_loss.item(),
             'translation_error_cm': trans_error_cm.item()
         }
+    

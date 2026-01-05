@@ -3,8 +3,8 @@ import torch
 import torch.optim as optim
 from tqdm import tqdm
 
-from models.FusionPoseNet import FusionPoseNet
-from models.ExtensionLoss import RGBDPoseLoss
+from models.TridentNetPose import TridentNetPose
+from models.ExtensionLoss import ExtensionLoss
 from utils.pose_utils import load_all_models_points
 
 
@@ -173,11 +173,11 @@ def train(
 ):
     points_dict = load_all_models_points(dataset_root, num_points=1000)
 
-    model = FusionPoseNet(
+    model = TridentNetPose(
         cam_k=cam_k
     ).to(device)
 
-    criterion = RGBDPoseLoss(
+    criterion = ExtensionLoss(
         add_weight=100.0,
         proj_weight=0.2,
         trans_weight=10.0,  # 🎯 HARDCODED: BOMBARDAMENTO TRANSLATION BOOSTER

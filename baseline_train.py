@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 from models.ResNetPose import ResNetPose
 from models.PinholeCamera import PinholeCamera
-from models.losses import PoseLoss
+from models.BaselineLoss import BaselineLoss
 
 def train(
     train_dataset,
@@ -52,7 +52,7 @@ def train(
         model = torch.nn.DataParallel(model)
 
     # Loss
-    criterion = PoseLoss(lambda_rotation=1.0, lambda_translation=0.0)
+    criterion = BaselineLoss(lambda_rotation=1.0, lambda_translation=0.0)
 
     
     # Funzione helper per recuperare il modello "reale" (dentro o fuori DataParallel)

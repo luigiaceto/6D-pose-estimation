@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 import torchvision.transforms as transforms
 from ultralytics import YOLO
 
-from models.FusionPoseNet import FusionPoseNet
-from utils.pose_utils import quaternion_to_rotation_matrix
+from models.TridentNetPose import TridentNetPose
+from utils.pose_utils import quaternion_to_rotation_matrix, YOLO_TO_LINEMOD_MAP
 from utils.visualization import draw_3d_bbox_colored, draw_axis_colored
 
 # =============================================================================
@@ -104,9 +104,8 @@ def visualize_fusion_predictions(
     print(f"Loading YOLO: {yolo_checkpoint}")
     yolo_model = YOLO(yolo_checkpoint)
     
-    print(f"Loading FusionPoseNet: {fusion_checkpoint}")
-    # Nota: FusionPoseNet richiede cam_k nell'init
-    pose_model = FusionPoseNet(cam_k=cam_k).to(device)
+    print(f"Loading TridentNetPose: {fusion_checkpoint}")
+    pose_model = TridentNetPose(cam_k=cam_k).to(device)
     checkpoint = torch.load(fusion_checkpoint, map_location=device)
     pose_model.load_state_dict(checkpoint['model_state_dict']) # Assumendo salvataggio standard
     pose_model.eval()
@@ -210,7 +209,7 @@ def visualize_fusion_predictions(
             
             # --- F. Recupera Ground Truth ---
             class_id = int(boxes.cls[i])
-            obj_id = class_id + 1 
+            obj_id = YOLO_TO_LINEMOD_MAP[class_id]
             
             # Estrazione ground truth per questa immagine (come baseline)
             if img_idx in gt_data_all:
