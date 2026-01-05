@@ -35,8 +35,8 @@ class RGBDDatasetPose(CustomDatasetPose):
             scale_factor = torch.empty(1).uniform_(0.99, 1.01).item()
             depth_tensor = depth_tensor * scale_factor
 
-            noise = torch.randn_like(depth_tensor) * 0.005 # +/- 5mm di rumore
-            mask = torch.rand_like(depth_tensor) > 0.10 # 10% dei pixel persi
+            noise = torch.randn_like(depth_tensor) * 0.003 # +/- 5mm di rumore
+            mask = torch.rand_like(depth_tensor) > 0.03 # 10% dei pixel persi
             depth_tensor = (depth_tensor + noise) * mask
 
         depth_tensor = depth_tensor.unsqueeze(0) # Aggiungi canale: (1, 224, 224)
