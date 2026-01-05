@@ -66,7 +66,7 @@ def train_one_epoch(
         proj_loss_sum += loss_dict['proj_loss'].item()
         trans_err_cm_sum += loss_dict['trans_err_cm'].item()
         proj_err_px_sum += loss_dict['proj_err_px'].item()
-        rot_err_asymm_deg_sum += loss_dict['rot_err_deg']
+        rot_err_asymm_deg_sum += loss_dict['rot_err_asymm_deg']
     
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
@@ -123,7 +123,7 @@ def validate(
             proj_loss_sum += loss_dict['proj_loss'].item()
             trans_err_cm_sum += loss_dict['trans_err_cm'].item()
             proj_err_px_sum += loss_dict['proj_err_px'].item()
-            rot_err_asymm_deg_sum += loss_dict['rot_err_deg']
+            rot_err_asymm_deg_sum += loss_dict['rot_err_asymm_deg']
 
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
