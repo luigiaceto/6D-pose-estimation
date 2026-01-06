@@ -54,16 +54,35 @@ def train_one_epoch(
         optimizer.zero_grad(set_to_none=True)
         
         with torch.amp.autocast(device_type='cuda', enabled=True):
-            # forward
-            pred_quat, pred_trans, pred_2d = model(cropped_img, net_input_depth, bbox_center, bbox_dims)
-                
+            # 1. Forward della rete (restituisce delta_z invece di translation)
+            pred_quat, pred_delta_z, pred_2d = model(cropped_img, net_input_depth, bbox_center, bbox_dims)
+            
+            # 2. 🎯 CALCOLA Z GEOMETRICA (robusta, mediana)
+            # Usa la depth map RAW + pred_2d (coordinate predette) per back-projection
+            cam_k_batch = criterion.cam_k.repeat(len(pred_quat), 1)
+            
+            # solve_translation_geometric_high_precision restituisce (B, 3) -> [tx, ty, tz]
+            # Prendiamo solo la Z (indice 2)
+            trans_geometric = solve_translation_geometric_high_precision(
+                cropped_depth=cropped_depth,      # Depth RAW (non scalata)
+                pred_uv=pred_2d,                   # Coordinate 2D predette
+                cam_k=cam_k_batch,
+                bbox_center=bbox_center,
+                bbox_dims=bbox_dims,
+                z_net=None,                        # Non serve fallback nel training
+                use_bbox_center_only=False        # Usa offset predetto
+            )
+            z_geometric = trans_geometric[:, 2:3]  # (B, 1) - Solo la Z
+            
+            # 3. Calcola loss con z_geometric + delta_z
             loss_dict = criterion(
                 pred_quat=pred_quat, 
-                pred_trans=pred_trans, 
+                pred_delta_z=pred_delta_z,         # 🎯 Delta invece di trans completa
                 gt_quat=gt_quaternion, 
                 gt_trans=gt_translation, 
                 pred_2d=pred_2d,
-                class_ids=obj_id
+                class_ids=obj_id,
+                z_geometric=z_geometric            # 🎯 Base geometrica
             )
 
             loss = loss_dict['total_loss']
@@ -130,22 +149,32 @@ def validate(
             net_depth = torch.where(net_depth > 100.0, net_depth / 1000.0, net_depth)
 
             with torch.amp.autocast(device_type='cuda', enabled=True):
-                pred_quat, pred_trans_net, pred_uv = model(cropped_img, net_depth, bbox_center, bbox_dims)
+                # 1. Forward della rete (restituisce delta_z)
+                pred_quat, pred_delta_z, pred_uv = model(cropped_img, net_depth, bbox_center, bbox_dims)
                 
-                # 🎯 SOVRASCRIVI TRASLAZIONE CON SOLVER GEOMETRICO HIGH PRECISION
-                # Usa le coordinate (u,v) predette dalla rete + depth map RAW per calcolare traslazione esatta
+                # 2. 🎯 CALCOLA Z GEOMETRICA per validation
                 cam_k_batch = criterion.cam_k.repeat(len(pred_quat), 1)
                 
-                # Usa depth RAW (non scalata) + bbox_center + bbox_dims per conversione globale→locale SCALATA
-                pred_trans = solve_translation_geometric_high_precision(cropped_depth, pred_uv, cam_k_batch, bbox_center, bbox_dims)
+                trans_geometric = solve_translation_geometric_high_precision(
+                    cropped_depth=cropped_depth,   # Depth RAW
+                    pred_uv=pred_uv, 
+                    cam_k=cam_k_batch, 
+                    bbox_center=bbox_center, 
+                    bbox_dims=bbox_dims,
+                    z_net=None,
+                    use_bbox_center_only=False
+                )
+                z_geometric = trans_geometric[:, 2:3]  # (B, 1)
                 
+                # 3. Calcola loss
                 loss_dict = criterion(
                     pred_quat=pred_quat, 
-                    pred_trans=pred_trans, 
+                    pred_delta_z=pred_delta_z,     # 🎯 Delta
                     gt_quat=gt_quaternion, 
                     gt_trans=gt_translation, 
                     pred_2d=pred_uv,
-                    class_ids=obj_id 
+                    class_ids=obj_id,
+                    z_geometric=z_geometric        # 🎯 Base geometrica
                 )
             
             # logging
@@ -194,11 +223,13 @@ def train(
     ).to(device)
 
     criterion = ExtensionLoss(
-        add_weight=20.0,
-        proj_weight=2.0,     # 🎯 AUMENTATO: Focus su predizione precisa (u,v)
-        trans_weight=0.0,    # 🎯 DISABILITATO: Non impara più traslazione diretta (usa solver geometrico)
+        add_weight=100.0,      # ADD Loss in cm - dominante per posa 6D finale
+        proj_weight=0.2,      # Projection Loss in pixel - aiuta convergenza offset (u,v)
+        trans_weight=200.0,    # 🎯 ATTIVO: Trans loss in metri - scala 100x più piccola, peso 100x più alto
+        rot_weight=0.0,       # Rot loss gestita da ADD (già include rotazione)
         cam_k=cam_k,
-        model_points_dict=points_dict
+        model_points_dict=points_dict,
+        loss_mode='add'
     ).to(device)
 
     params = [

@@ -128,15 +128,18 @@ def solve_translation_geometric_high_precision(cropped_depth, pred_uv, cam_k, bb
     
     return torch.stack([tx, ty, z_meters], dim=1)
 
-def solve_translation_direct_from_file(depth_paths, pred_coords, cam_k):
+def solve_translation_direct_from_file(depth_paths, pred_coords, cam_k, obj_ids, object_diameters):
     """
     Legge la Z dal file PNG originale alle coordinate PREDETTE DALLA RETE.
-    Questo combina la precisione del sensore (Direct Read) con l'intelligenza della rete (Offset Prediction).
+    Applica la correzione Skin-to-Heart: il sensore misura la superficie,
+    ma la GT è riferita al centroide. Aggiungiamo radius = diameter / 2.
     
     Args:
         depth_paths: list[str] paths ai file depth
         pred_coords: Tensor (B, 2) coordinate globali [u, v] predette dalla rete
         cam_k: Tensor (B, 4) intrinseci
+        obj_ids: Tensor (B,) ID degli oggetti nel batch
+        object_diameters: dict {obj_id: diameter_mm} diametri in mm
     
     Returns:
         (B, 3) Traslazione [Tx, Ty, Tz] in metri
@@ -147,9 +150,12 @@ def solve_translation_direct_from_file(depth_paths, pred_coords, cam_k):
     
     # Portiamo su CPU per usare con cv2/numpy
     coords_np = pred_coords.detach().cpu().numpy()
+    obj_ids_np = obj_ids.cpu().numpy()
     
     for i in range(B):
         path = depth_paths[i]
+        obj_id = int(obj_ids_np[i])
+        
         # Usiamo le coordinate predette dalla rete!
         cx, cy = int(coords_np[i, 0]), int(coords_np[i, 1])
         
@@ -161,30 +167,24 @@ def solve_translation_direct_from_file(depth_paths, pred_coords, cam_k):
             z_values.append(0.5)  # Fallback dummy
             continue
             
-        H, W = depth_img.shape
+        img_h, img_w = depth_img.shape
         
-        # 2. Safety Clamp coordinate
-        cx = min(max(cx, 0), W - 1)
-        cy = min(max(cy, 0), H - 1)
+        # 2. Robust Center Calc (clip to image bounds)
+        cx = min(max(cx, 0), img_w - 1)
+        cy = min(max(cy, 0), img_h - 1)
         
-        # 3. Leggi Z (Mediana 3x3 per rimuovere rumore puntuale)
-        # Estrai patch 3x3 intorno al centro
-        x1, x2 = max(0, cx-1), min(W, cx+2)
-        y1, y2 = max(0, cy-1), min(H, cy+2)
-        patch = depth_img[y1:y2, x1:x2]
+        # 3. Depth value at center (mm) - SINGLE PIXEL READ
+        z_surface_mm = float(depth_img[cy, cx])
         
-        if patch.size == 0:
-            z_val = 0.0
-        else:
-            # Filtra zeri
-            valid_pixels = patch[patch > 0]
-            if valid_pixels.size > 0:
-                z_val = np.median(valid_pixels)
-            else:
-                z_val = 0.0
+        # 4. CORREZIONE SKIN-TO-HEART
+        # Il sensore misura la superficie, ma la GT è al centroide
+        # Aggiungiamo il raggio (metà diametro) per compensare
+        diameter_mm = object_diameters.get(obj_id, 0.0)
+        radius_mm = diameter_mm / 2.0
+        z_corrected_mm = z_surface_mm + radius_mm
         
-        # Converti mm -> metri
-        z_meters = z_val / 1000.0
+        # 5. Converti mm -> metri
+        z_meters = z_corrected_mm / 1000.0
         z_values.append(z_meters)
     
     z_tensor = torch.tensor(z_values, device=device, dtype=torch.float32)

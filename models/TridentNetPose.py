@@ -80,12 +80,14 @@ class TridentNetPose(nn.Module):
         # --- Head Rotazione ---
         self.rot_head = nn.Linear(1024, 4) # Output: 4 quaternioni
         
-        # --- Head Depth (Z) ---
+        # --- Head Depth (Z) - RESIDUAL LEARNING ---
+        # Invece di predire Z assoluta, predice un DELTA (correzione skin-to-heart)
+        # Inizializzazione vicino a 0 così all'inizio si affida alla geometria
         self.z_head = nn.Sequential(
             nn.Linear(1024, 128),
             nn.ReLU(),
             nn.Dropout(0.2),
-            nn.Linear(128, 1) # Output: Z (metri)
+            nn.Linear(128, 1)  # Output: Delta_Z (metri) - correzione da applicare a Z_geometric
         )
 
         # --- Head Offset u & v ---
@@ -112,7 +114,10 @@ class TridentNetPose(nn.Module):
         
         # Per la rotazione, inizializzazione specifica
         nn.init.xavier_uniform_(self.rot_head.weight, gain=0.01)
-        nn.init.constant_(self.z_head[-1].bias, -0.35) # inizializzo a distanza circa 70cm
+        
+        # 🎯 RESIDUAL Z: Inizializza delta_z ~0 (piccolo gain per stabilità)
+        nn.init.xavier_uniform_(self.z_head[-1].weight, gain=0.01)
+        nn.init.constant_(self.z_head[-1].bias, 0.0)
 
         with torch.no_grad():
             self.rot_head.bias.fill_(0)
@@ -139,14 +144,10 @@ class TridentNetPose(nn.Module):
         quaternion = self.rot_head(fused)
         quaternion = F.normalize(quaternion, p=2, dim=1)
         
-        # ** Depth Z (Log-Space Prediction) **
-        # La rete predice s = log(Z), poi calcoliamo Z = exp(s)
-        # Vantaggi:
-        # 1. Z > 0 sempre garantito (no offset arbitrari)
-        # 2. Errore relativo invece che assoluto (10% a 0.5m = 10% a 5m)
-        # 3. Standard nella letteratura di depth estimation
-        log_z = self.z_head(fused)  # (B, 1) - predice log(Z)
-        z_pred = torch.exp(log_z[:, 0:1])  # (B, 1) - Z in metri
+        # ** Depth Z - RESIDUAL DELTA **
+        # La rete predice solo un DELTA (correzione), non un valore assoluto
+        # Delta_Z sarà combinato con Z_geometric nella loss
+        delta_z = self.z_head(fused)  # (B, 1) - delta in metri (può essere +/-)
         
         # Nota: Se z_pred diventa troppo piccolo/grande, gradient clipping lo gestisce
 
@@ -154,13 +155,9 @@ class TridentNetPose(nn.Module):
         delta_uv = self.offset_head(fused) # (B, 2)
         uv = bbox_center_pixel + delta_uv
 
-        translation = PinholeCamera.apply_unprojection(
-            points_2d=uv,
-            depth=z_pred,
-            intrinsics=self.cam_k
-        )
-        
-        return quaternion, translation, uv # [predizione quaternioni, predizione traslazione, predizione centro oggetto 3D visto in 2D] 
+        # 🎯 HYBRID APPROACH: Restituisci delta_z (non translation completa)
+        # La translation finale sarà z_geometric + delta_z (calcolata nella loss)
+        return quaternion, delta_z, uv  # [quaternion, delta_z (residual), centro 2D] 
 
     def freeze_rgb(self):
         for param in self.rgb_backbone.parameters():

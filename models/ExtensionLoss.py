@@ -51,7 +51,31 @@ class ExtensionLoss(nn.Module):
             raise ValueError(f"loss_mode deve essere 'add' o 'rotation', ricevuto: {loss_mode}")
 
 
-    def forward(self, pred_quat, pred_trans, gt_quat, gt_trans, pred_2d, class_ids):
+    def forward(self, pred_quat, pred_delta_z, gt_quat, gt_trans, pred_2d, class_ids, z_geometric):
+        """
+        Args:
+            pred_quat: (B, 4) quaternion predetto
+            pred_delta_z: (B, 1) DELTA Z predetto dalla rete (correzione)
+            gt_quat: (B, 4) quaternion GT
+            gt_trans: (B, 3) translation GT
+            pred_2d: (B, 2) coordinate 2D predette (u, v)
+            class_ids: (B,) ID oggetti
+            z_geometric: (B, 1) profondità calcolata geometricamente (DETACHED)
+        """
+        # 🎯 HYBRID DEPTH: Z_finale = Z_geometric (robusto) + Delta_Z (correzione rete)
+        z_final = z_geometric.detach() + pred_delta_z  # (B, 1)
+        
+        # Ricostruisci translation completa usando z_final
+        fx, fy = self.cam_k[:, 0:1], self.cam_k[:, 1:2]
+        cx, cy = self.cam_k[:, 2:3], self.cam_k[:, 3:4]
+        
+        # Back-projection: (u, v, z) -> (X, Y, Z)
+        z_safe = torch.clamp(z_final, min=0.01)  # Evita divisioni per 0
+        pred_x = (pred_2d[:, 0:1] - cx) * z_safe / fx
+        pred_y = (pred_2d[:, 1:2] - cy) * z_safe / fy
+        pred_trans = torch.cat([pred_x, pred_y, z_safe], dim=1)  # (B, 3)
+        
+        # Calcola gt_2d per projection loss
         fx, fy = self.cam_k[:, 0:1], self.cam_k[:, 1:2]
         cx, cy = self.cam_k[:, 2:3], self.cam_k[:, 3:4]
         gt_z_safe = torch.clamp(gt_trans[:, 2:3], min=0.001)
