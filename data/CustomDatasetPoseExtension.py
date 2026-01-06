@@ -45,63 +45,50 @@ class RGBDDatasetPose(CustomDatasetPose):
 
     def __getitem__(self, idx):
         folder_id, sample_id = self.samples[idx]
+        translation, rotation, quaternion, bbox_gt, obj_id, bbox_gt_YOLO = self.load_6d_pose(folder_id, sample_id)
         
-        # carica bbox ground truth
-        bbox_base = np.array(self.ground_truths[folder_id][sample_id]['obj_bb'], dtype=np.float32)
-        
-        # CRITICO: Applica jitter UNA SOLA VOLTA - stesso bbox per RGB e Depth
-        img_path = str(self.dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png")
-        img = Image.open(img_path).convert("RGB")
-        img_w, img_h = img.size
-        
-        bbox_jittered = self.apply_bbox_jitter(tuple(bbox_base), img_w, img_h)
-        
-        # crop RGB con bbox jitterato
-        square_img = self._crop_and_pad_image(img, bbox_jittered)
-        cropped_img = self.transform_crop(square_img)
-        
-        # crop Depth con STESSO bbox jitterato usato per croppare l'immagine RGB
-        depth_tensor = self.load_cropped_depth(folder_id, sample_id, bbox_jittered)
-        
-        # carica ground truth
-        pose = self.ground_truths[folder_id][sample_id]
-        translation = np.array(pose['cam_t_m2c'], dtype=np.float32) / 1000.0
-        rotation = np.array(pose['cam_R_m2c'], dtype=np.float32).reshape(3, 3)
-        quaternion = np.array(pose['quaternion'], dtype=np.float32)
-        obj_id = np.array(pose['obj_id'], dtype=np.float32)
-        
-        # carica immagine RGB completa
-        img_tensor = self.transform_img(img)
-        
-        # calcola bbox in fomatio YOLO
-        bbox_YOLO = self.compute_yolo_bbox(bbox_base)
+        img, img_w, img_h = self.load_image(
+            str(self.dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png")
+        )
 
-        # quanto il crop (bbox) occupa dell'immagine originale
-        bbox_dims = bbox_YOLO[2:4]
+        bbox_jittered = self.apply_bbox_jitter(tuple(bbox_gt), img_w, img_h)
+        bbox_jittered_YOLO = self.compute_yolo_bbox(bbox_jittered)
+        bbox_jittered_dims = bbox_jittered_YOLO[2:4] # quanto il crop jitterato occupa dell'immagine originale
         
-        # DA METTERE ANCHE NELLA BASELINE ???
-        # bbox center in pixels (per pinhole).
-        # CRITICO: Usa bbox_jittered per coerenza geometrica con il crop!
-        # Il network vede un'immagine croppata con bbox_jittered, quindi il 
-        # reference point deve essere il centro di QUELLO, non di bbox_base.
-        # Durante inference (val/test) non c'è jitter quindi bbox_jittered == bbox_base.
-        cx_pixel = bbox_jittered[0] + bbox_jittered[2] / 2.0
-        cy_pixel = bbox_jittered[1] + bbox_jittered[3] / 2.0
+        cropped_img = self._crop_and_pad_image(img, bbox_jittered)
+        cropped_img = self.transform_crop(cropped_img)
+        
+        cropped_depth = self.load_cropped_depth(folder_id, sample_id, bbox_jittered)
+        
+        # centro del bbox jitterato (verrà regredito al centro reale dell'oggetto
+        # grazie all'utilizzo di δu e δv predetti dalla rete).
+        # N.B. a test time non c'è jitter, quindi bbox_jittered == bbox_base.
+        bbox_jittered_cx_pixel = bbox_jittered[0] + bbox_jittered[2] / 2.0
+        bbox_jittered_cy_pixel = bbox_jittered[1] + bbox_jittered[3] / 2.0
+        
+        # Path assoluto depth map originale per Direct Read
+        depth_path_str = str(self.dataset_root / "data" / f"{folder_id:02d}" / "depth" / f"{sample_id:04d}.png")
         
         return {
             # sample  
             "sample_id": torch.tensor([folder_id, sample_id]),
             "cropped_img": cropped_img,
-            "rgb": img_tensor,
-            "cropped_depth": depth_tensor,
+            "cropped_depth": cropped_depth,
+            "rgb": self.transform_img(img),                                         # usato solo in visualizzazione
+            "bbox_base": torch.tensor(bbox_jittered, dtype=torch.float32),
+            "bbox_YOLO": torch.tensor(bbox_gt_YOLO),                                # usato solo in visualizzazione
+            "bbox_dims": torch.tensor(bbox_jittered_dims, dtype=torch.float32),
+            "bbox_center_pixel": torch.tensor(
+                [
+                    bbox_jittered_cx_pixel,
+                    bbox_jittered_cy_pixel
+                ],
+                dtype=torch.float32
+            ),
 
             # label/ground truth
             "obj_id": torch.tensor(obj_id),
             "translation": torch.tensor(translation),
             "rotation": torch.tensor(rotation),
-            "quaternion": torch.tensor(quaternion),
-            "bbox_base": torch.tensor(bbox_base, dtype=torch.float32),
-            "bbox_YOLO": torch.tensor(bbox_YOLO),
-            "bbox_dims": torch.tensor(bbox_dims, dtype=torch.float32),
-            "bbox_center_pixel": torch.tensor([cx_pixel, cy_pixel], dtype=torch.float32) # da concatenare nella fusione
+            "quaternion": torch.tensor(quaternion)
         }

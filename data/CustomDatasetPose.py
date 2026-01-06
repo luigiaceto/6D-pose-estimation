@@ -10,7 +10,7 @@ from utils.pose_utils import IMG_HEIGHT, IMG_WIDTH
 
 
 class CustomDatasetPose(Dataset):
-    def __init__(self, dataset_root, split='train', train_ratio=0.8, seed=42, cam_K=None):
+    def __init__(self, dataset_root, split='train', train_ratio=0.8, seed=42):
         """
         Args:
             dataset_root (str): Path to the dataset directory.
@@ -32,7 +32,6 @@ class CustomDatasetPose(Dataset):
         self.split = split
         self.train_ratio = train_ratio
         self.seed = seed
-        self.camera_intrinsics = [cam_K[0], cam_K[4], cam_K[2], cam_K[5]] # ci serve ???
 
         # Get list of all samples as (folder_id, sample_id)
         self.samples, self.folder_names = self.get_all_samples()
@@ -119,9 +118,6 @@ class CustomDatasetPose(Dataset):
 
         return samples, folder_names
     
-    def get_image_mean_std(self):
-        return self.image_mean, self.image_std
-    
     def extract_ground_truth(self):
         ground_truth = {}
         for elem in self.folder_names:
@@ -171,7 +167,8 @@ class CustomDatasetPose(Dataset):
         Load an RGB image.
         """
         img = Image.open(img_path).convert("RGB")
-        return self.transform_img(img)
+        img_w, img_h = img.size
+        return img, img_w, img_h
     
     def compute_yolo_bbox(self, bbox_base):
         """
@@ -235,6 +232,9 @@ class CustomDatasetPose(Dataset):
         if self.split != 'train':
             return bbox  # Nessun jitter in val/test
         
+        if np.random.rand() < 0.2:
+            return bbox
+
         # random Scale (zoom in/out del +/- 10%)
         scale_factor = np.random.uniform(0.9, 1.1)
         w_new = w * scale_factor
@@ -341,18 +341,18 @@ class CustomDatasetPose(Dataset):
         """
         pose = self.ground_truths[folder_id][sample_id]
         
-        translation = np.array(pose['cam_t_m2c'], dtype=np.float32)/1000.0      # (x,y,z) in metri ---> dim 3
+        translation = np.array(pose['cam_t_m2c'], dtype=np.float32) / 1000.0    # (x,y,z) in metri ---> dim 3
         rotation = np.array(pose['cam_R_m2c'], dtype=np.float32).reshape(3, 3)  # rotation matrix ---> dim 3x3
         quaternion = np.array(pose['quaternion'], dtype=np.float32)             # quaternion ---> dim 4
-        bbox_base = np.array(pose['obj_bb'], dtype=np.float32)                  # x_min, y_min, width, height ---> dim 4
+        bbox_gt = np.array(pose['obj_bb'], dtype=np.float32)                    # x_min, y_min, width, height ---> dim 4
         obj_id = np.array(pose['obj_id'], dtype=np.float32)                     # label ---> dim 1
-        
-        cropped_img = self.load_cropped_image(str(self.dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png"), bbox_base)
+
+        bbox_gt_YOLO = self.compute_yolo_bbox(bbox_gt)
 
         # Calcola bbox YOLO usando il metodo centralizzato
-        bbox_YOLO = self.compute_yolo_bbox(bbox_base)
+        bbox_gt_YOLO = self.compute_yolo_bbox(bbox_gt)
 
-        return cropped_img, translation, rotation, quaternion, bbox_base, obj_id, bbox_YOLO
+        return translation, rotation, quaternion, bbox_gt, obj_id, bbox_gt_YOLO
 
     def __len__(self):
         """
@@ -365,25 +365,29 @@ class CustomDatasetPose(Dataset):
         Load a dataset sample.
         """
         folder_id, sample_id = self.samples[idx]
+        translation, rotation, quaternion, bbox_gt, obj_id, bbox_gt_YOLO = self.load_6d_pose(folder_id, sample_id)
 
-        img_path = str(self.dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png")
+        img, img_w, img_h = self.load_image(
+            str(self.dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png")
+        )
 
-        img = self.load_image(img_path)
+        bbox_jittered = self.apply_bbox_jitter(tuple(bbox_gt), img_w, img_h)
 
-        cropped_img, translation, rotation, quaternion, bbox_base, obj_id, bbox_YOLO = self.load_6d_pose(folder_id, sample_id)
-
+        cropped_img = self._crop_and_pad_image(img, bbox_jittered)
+        cropped_img = self.transform_crop(cropped_img)
+        
         return {
             # sample
             "sample_id": torch.tensor(self.samples[idx]),
-            "cropped_img": cropped_img, # input della ResNet50
-            "rgb": img,
+            "cropped_img": cropped_img,                     # input della ResNet50
+            "rgb": self.transform_img(img),                 # usato solo in visualizzazione
+            "bbox_base": torch.tensor(bbox_jittered),
+            "bbox_YOLO": torch.tensor(bbox_gt_YOLO),        # usato solo in visualizzazione e da YOLO per costruire il suo dataset
 
             # label/ground truth
             "obj_id": torch.tensor(obj_id),
             "translation": torch.tensor(translation),
             "rotation": torch.tensor(rotation),
-            "quaternion": torch.tensor(quaternion),
-            "bbox_base": torch.tensor(bbox_base),
-            "bbox_YOLO": torch.tensor(bbox_YOLO) # bounding box ground truth in formato yolo
+            "quaternion": torch.tensor(quaternion)
         }
     
