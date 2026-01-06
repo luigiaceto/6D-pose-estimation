@@ -4,6 +4,7 @@ import numpy as np
 import yaml
 import pandas as pd
 import trimesh
+import cv2
 
 IMG_WIDTH = 640
 IMG_HEIGHT = 480
@@ -44,70 +45,161 @@ def yolo_to_xyxy(yolo_box, img_width, img_height):
     return [x1, y1, x2, y2]
 
 
-def solve_translation_geometric_high_precision(cropped_depth, pred_uv, cam_k, bbox_center):
+def solve_translation_geometric_high_precision(cropped_depth, pred_uv, cam_k, bbox_center, bbox_dims, z_net=None, use_bbox_center_only=True):
     """
-    Calcola Tx, Ty, Tz leggendo la depth map alle coordinate predette (u,v).
-    Usa MEDIANA LOCALE 3x3 per robustezza contro buchi e rumore.
+    Versione ROBUSTA + CENTER MODE.
+    use_bbox_center_only: Se True, ignora l'offset predetto dalla rete e assume che 
+                          il centro dell'oggetto sia il centro geometrico del BBox.
+    """
+    B, _, H, W = cropped_depth.shape 
+    IMG_W, IMG_H = 640.0, 480.0
+    
+    # 1. Calcolo Scala (Zoom Factor)
+    w_px = bbox_dims[:, 0] * IMG_W
+    h_px = bbox_dims[:, 1] * IMG_H
+    max_dim = torch.max(w_px, h_px)
+    scale_factor = W / torch.clamp(max_dim, min=1.0)
+    
+    # --- LOGICA DI PUNTAMENTO ---
+    if use_bbox_center_only:
+        # FEDERICO MODE: Ci fidiamo del BBox. 
+        # Il centro dell'oggetto è il centro del crop (W/2, H/2).
+        u_local = torch.full((B,), W/2, device=cropped_depth.device)
+        v_local = torch.full((B,), H/2, device=cropped_depth.device)
+        
+        # Per calcolare X e Y finali, usiamo le coordinate globali del centro BBox
+        pred_uv_final = bbox_center
+    else:
+        # OFFSET MODE (Tua Rete): Usiamo l'offset predetto
+        delta_uv_global = pred_uv - bbox_center 
+        delta_uv_crop = delta_uv_global * scale_factor.unsqueeze(1)
+        u_local = delta_uv_crop[:, 0] + (W / 2)
+        v_local = delta_uv_crop[:, 1] + (H / 2)
+        pred_uv_final = pred_uv
+
+    # 2. Campionamento Adattivo (Kernel Gigante 21x21)
+    # Questo kernel grande aiuta a mediare il rumore del sensore nel centro
+    k_size = 21 
+    pad = k_size // 2
+    
+    u_center = torch.clamp(u_local.long(), pad, W - 1 - pad)
+    v_center = torch.clamp(v_local.long(), pad, H - 1 - pad)
+    
+    # Creazione griglia di campionamento vettorizzata
+    grid_y, grid_x = torch.meshgrid(
+        torch.arange(-pad, pad + 1, device=cropped_depth.device),
+        torch.arange(-pad, pad + 1, device=cropped_depth.device),
+        indexing='ij'
+    )
+    off_x = grid_x.flatten()
+    off_y = grid_y.flatten()
+    
+    sample_u = torch.clamp(u_center.unsqueeze(1) + off_x.unsqueeze(0), 0, W - 1)
+    sample_v = torch.clamp(v_center.unsqueeze(1) + off_y.unsqueeze(0), 0, H - 1)
+    
+    flat_indices = (sample_v * W + sample_u).long()
+    z_patches = torch.gather(cropped_depth.view(B, -1), 1, flat_indices)
+    
+    # 3. Filtraggio Ibrido (Mediana Geometrica + Fallback Rete)
+    sorted_z, _ = torch.sort(z_patches, dim=1)
+    z_geom = sorted_z[:, z_patches.shape[1] // 2] # Mediana
+    
+    # Unità mm -> m
+    z_geom = torch.where(z_geom > 100.0, z_geom / 1000.0, z_geom)
+    
+    # Fallback sulla rete se disponibile
+    if z_net is not None:
+        z_net = z_net.view(-1)
+        z_net = torch.where(z_net > 100.0, z_net / 1000.0, z_net)
+    else:
+        z_net = torch.ones_like(z_geom) * 0.5 # Dummy fallback
+
+    # Usa la geometria se il valore è sensato (tra 10cm e 5m), altrimenti usa la rete
+    valid_mask = (z_geom > 0.1) & (z_geom < 5.0)
+    z_final = torch.where(valid_mask, z_geom, z_net)
+    
+    # 4. Back-Projection (Pinhole)
+    fx, fy, cx, cy = cam_k[:, 0], cam_k[:, 1], cam_k[:, 2], cam_k[:, 3]
+    
+    tx = (pred_uv_final[:, 0] - cx) * z_final / fx
+    ty = (pred_uv_final[:, 1] - cy) * z_final / fy
+    
+    return torch.stack([tx, ty, z_final], dim=1)
+    
+    return torch.stack([tx, ty, z_meters], dim=1)
+
+def solve_translation_direct_from_file(depth_paths, pred_coords, cam_k):
+    """
+    Legge la Z dal file PNG originale alle coordinate PREDETTE DALLA RETE.
+    Questo combina la precisione del sensore (Direct Read) con l'intelligenza della rete (Offset Prediction).
     
     Args:
-        cropped_depth (Tensor): (B, 1, 224, 224) RAW Depth (mm o metri)
-        pred_uv (Tensor): (B, 2) Global pixel coordinates predette dalla rete
-        cam_k (Tensor): (B, 4) Intrinseci [fx, fy, cx, cy]
-        bbox_center (Tensor): (B, 2) Centro del bbox usato per il crop (Global coords)
+        depth_paths: list[str] paths ai file depth
+        pred_coords: Tensor (B, 2) coordinate globali [u, v] predette dalla rete
+        cam_k: Tensor (B, 4) intrinseci
     
     Returns:
         (B, 3) Traslazione [Tx, Ty, Tz] in metri
     """
-    B, _, H, W = cropped_depth.shape
+    device = pred_coords.device
+    B = len(depth_paths)
+    z_values = []
     
-    # 1. Global to Local transformation
-    u_local = (pred_uv[:, 0] - bbox_center[:, 0]) + (W / 2)
-    v_local = (pred_uv[:, 1] - bbox_center[:, 1]) + (H / 2)
+    # Portiamo su CPU per usare con cv2/numpy
+    coords_np = pred_coords.detach().cpu().numpy()
     
-    # 2. Creiamo griglia di offset 3x3 per il campionamento
-    # Offsets: (-1,-1), (-1,0), ..., (1,1)
-    kernel_size = 3
-    pad = kernel_size // 2
-    
-    # Clamping del centro per non uscire dai bordi col kernel
-    u_center = torch.clamp(u_local.long(), pad, W - 1 - pad)
-    v_center = torch.clamp(v_local.long(), pad, H - 1 - pad)
-    
-    # Raccogliamo i vicini
-    z_samples = []
-    for dy in range(-pad, pad + 1):
-        for dx in range(-pad, pad + 1):
-            # Coordinate vicini
-            u_sample = torch.clamp(u_center + dx, 0, W-1)
-            v_sample = torch.clamp(v_center + dy, 0, H-1)
+    for i in range(B):
+        path = depth_paths[i]
+        # Usiamo le coordinate predette dalla rete!
+        cx, cy = int(coords_np[i, 0]), int(coords_np[i, 1])
+        
+        # 1. Carica Depth Originale (16-bit mm)
+        # Usa cv2.IMREAD_UNCHANGED per mantenere i uint16
+        depth_img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        
+        if depth_img is None:
+            z_values.append(0.5)  # Fallback dummy
+            continue
             
-            # Indice linearizzato
-            idx = (v_sample * W) + u_sample
-            
-            # Gather z value
-            z_val = cropped_depth.view(B, -1).gather(1, idx.unsqueeze(1))
-            z_samples.append(z_val)
-            
-    # Stack -> (B, 9)
-    z_stack = torch.cat(z_samples, dim=1)
+        H, W = depth_img.shape
+        
+        # 2. Safety Clamp coordinate
+        cx = min(max(cx, 0), W - 1)
+        cy = min(max(cy, 0), H - 1)
+        
+        # 3. Leggi Z (Mediana 3x3 per rimuovere rumore puntuale)
+        # Estrai patch 3x3 intorno al centro
+        x1, x2 = max(0, cx-1), min(W, cx+2)
+        y1, y2 = max(0, cy-1), min(H, cy+2)
+        patch = depth_img[y1:y2, x1:x2]
+        
+        if patch.size == 0:
+            z_val = 0.0
+        else:
+            # Filtra zeri
+            valid_pixels = patch[patch > 0]
+            if valid_pixels.size > 0:
+                z_val = np.median(valid_pixels)
+            else:
+                z_val = 0.0
+        
+        # Converti mm -> metri
+        z_meters = z_val / 1000.0
+        z_values.append(z_meters)
     
-    # 3. Calcolo Mediana (robusta agli outlier/zeri)
-    # Nota: se ci sono molti zeri, la mediana potrebbe essere 0. 
-    # Idealmente filtreremmo i 0, ma la mediana su 3x3 è un buon compromesso veloce.
-    z_raw = torch.median(z_stack, dim=1).values
+    z_tensor = torch.tensor(z_values, device=device, dtype=torch.float32)
     
-    # 4. Gestione Unità (mm -> metri) e Safety Clamp
-    # Se > 100 assumiamo mm.
-    z_meters = torch.where(z_raw > 100.0, z_raw / 1000.0, z_raw)
-    z_meters = torch.clamp(z_meters, min=0.1) # Evita Z=0
+    # Fallback: Se la rete ha puntato nel vuoto (z=0), purtroppo non possiamo farci nulla 
+    # se non usare un valore medio o fidarci della z_head (se passata). 
+    # Per ora usiamo un clamp minimo.
+    z_tensor = torch.where(z_tensor > 0.01, z_tensor, torch.tensor(0.5, device=device))
     
-    # 5. Pinhole Inverse
-    fx, fy, cx, cy = cam_k[:, 0], cam_k[:, 1], cam_k[:, 2], cam_k[:, 3]
-    tx = (pred_uv[:, 0] - cx) * z_meters / fx
-    ty = (pred_uv[:, 1] - cy) * z_meters / fy
+    # 4. Back-Projection usando le coordinate PREDETTE
+    fx, fy, cx_k, cy_k = cam_k[:, 0], cam_k[:, 1], cam_k[:, 2], cam_k[:, 3]
+    tx = (pred_coords[:, 0] - cx_k) * z_tensor / fx
+    ty = (pred_coords[:, 1] - cy_k) * z_tensor / fy
     
-    return torch.stack([tx, ty, z_meters], dim=1)
-
+    return torch.stack([tx, ty, z_tensor], dim=1)
 
 def solve_translation_geometric(cropped_depth, bbox_center, cam_k):
     """

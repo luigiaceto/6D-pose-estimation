@@ -136,8 +136,8 @@ def validate(
                 # Usa le coordinate (u,v) predette dalla rete + depth map RAW per calcolare traslazione esatta
                 cam_k_batch = criterion.cam_k.repeat(len(pred_quat), 1)
                 
-                # Usa depth RAW (non scalata) + bbox_center per conversione globale→locale
-                pred_trans = solve_translation_geometric_high_precision(cropped_depth, pred_uv, cam_k_batch, bbox_center)
+                # Usa depth RAW (non scalata) + bbox_center + bbox_dims per conversione globale→locale SCALATA
+                pred_trans = solve_translation_geometric_high_precision(cropped_depth, pred_uv, cam_k_batch, bbox_center, bbox_dims)
                 
                 loss_dict = criterion(
                     pred_quat=pred_quat, 

@@ -88,6 +88,9 @@ class RGBDDatasetPose(CustomDatasetPose):
         cx_pixel = bbox_jittered[0] + bbox_jittered[2] / 2.0
         cy_pixel = bbox_jittered[1] + bbox_jittered[3] / 2.0
         
+        # Path assoluto depth map originale per Direct Read
+        depth_path_str = str(self.dataset_root / "data" / f"{folder_id:02d}" / "depth" / f"{sample_id:04d}.png")
+        
         return {
             # sample  
             "sample_id": torch.tensor([folder_id, sample_id]),
@@ -103,5 +106,8 @@ class RGBDDatasetPose(CustomDatasetPose):
             "bbox_base": torch.tensor(bbox_base, dtype=torch.float32),
             "bbox_YOLO": torch.tensor(bbox_YOLO),
             "bbox_dims": torch.tensor(bbox_dims, dtype=torch.float32),
-            "bbox_center_pixel": torch.tensor([cx_pixel, cy_pixel], dtype=torch.float32) # da concatenare nella fusione
+            "bbox_center_pixel": torch.tensor([cx_pixel, cy_pixel], dtype=torch.float32), # da concatenare nella fusione
+            
+            # >>> NUOVO: Path depth map originale per Direct Read
+            "depth_path": depth_path_str
         }

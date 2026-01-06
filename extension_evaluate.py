@@ -15,6 +15,7 @@ from utils.pose_utils import (
     compute_translation_error,
     solve_translation_geometric,
     solve_translation_geometric_high_precision,
+    solve_translation_direct_from_file,
     SYMMETRIC_OBJECTS
 )
 
@@ -74,11 +75,20 @@ def evaluate_extension_batch(
             # Forward
             pred_quat, pred_trans_net, pred_uv = model(rgb, net_input_depth, bbox_center, bbox_dims)
             
-            # 🎯 SOVRASCRIVI TRASLAZIONE CON SOLVER GEOMETRICO HIGH PRECISION
-            # Usa depth RAW (non scalata) + bbox_center per conversione globale→locale
+            # 🎯 SOVRASCRIVI TRASLAZIONE CON DIRECT READ FROM FILE
+            # Recupera i path dal batch
+            depth_paths_batch = batch['depth_path']  # Lista di stringhe
+            
+            # Usa depth ORIGINALE dal disco (640x480) - Bypassa crop/resize artifacts
             cam_k_tensor = torch.tensor([cam_k[0], cam_k[4], cam_k[2], cam_k[5]], device=device).unsqueeze(0)
             cam_k_batch = cam_k_tensor.repeat(len(pred_quat), 1)
-            pred_trans = solve_translation_geometric_high_precision(depth, pred_uv, cam_k_batch, bbox_center)
+            
+            # >>> FIX: Passiamo pred_uv (il punto dove la rete crede sia il centro)
+            pred_trans = solve_translation_direct_from_file(
+                depth_paths_batch, 
+                pred_uv,        # <--- QUI CAMBIA TUTTO
+                cam_k_batch
+            )
             
             pred_rot_matrix = quaternion_to_rotation_matrix(pred_quat) # (B, 3, 3)
             
