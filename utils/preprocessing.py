@@ -156,7 +156,7 @@ def create_dataset_YOLO(number_classes, train_samples, validation_samples, test_
         total = 0 # used to normalize count
         for el in tqdm(dataset, desc="Moving..."):
             # el is (folderId, sampleId)
-            _, _, _, _, _, obj_id, bbox = train_dataset.load_6d_pose(el[0], el[1])
+            _, _, _, _, obj_id, bbox = train_dataset.load_6d_pose(el[0], el[1])
             # copy image into the new folder
             # avoid overwriting the files, so concat also the name of the folderId to the destination file
             shutil.copy(

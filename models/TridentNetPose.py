@@ -154,10 +154,19 @@ class TridentNetPose(nn.Module):
         # ** Offset per u & v **
         delta_uv = self.offset_head(fused) # (B, 2)
         uv = bbox_center_pixel + delta_uv
+        delta_uv_percent = self.offset_head(fused) # (B, 2)
+        # ALTERNATIVA
+        #IMG_W = 640.0
+        #IMG_H = 480.0
+        #img_size = torch.tensor([IMG_W, IMG_H], device=bbox_dims.device).view(1, 2)
+        #bbox_size_px = bbox_dims * img_size
+        #delta_uv_px = delta_uv_percent * bbox_size_px
+        #uv = bbox_center_pixel + delta_uv_px
 
         # 🎯 HYBRID APPROACH: Restituisci delta_z (non translation completa)
         # La translation finale sarà z_geometric + delta_z (calcolata nella loss)
-        return quaternion, delta_z, uv  # [quaternion, delta_z (residual), centro 2D] 
+        return quaternion, delta_z, uv  # [quaternion, delta_z (residual), centro 2D]
+        # N.B. ⚠⚠⚠ CONVIENE COMUNQUE RESTITUIRE ANCHE TRANS PER UN FATTO DI COMODITA' AD INFERENCE TIME ⚠⚠⚠
 
     def freeze_rgb(self):
         for param in self.rgb_backbone.parameters():
