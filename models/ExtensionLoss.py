@@ -66,18 +66,18 @@ class ExtensionLoss(nn.Module):
         z_final = z_geometric.detach() + pred_delta_z  # (B, 1)
         
         # Ricostruisci translation completa usando z_final
-        fx, fy = self.cam_k[:, 0:1], self.cam_k[:, 1:2]
-        cx, cy = self.cam_k[:, 2:3], self.cam_k[:, 3:4]
+        fx = self.cam_k[:, 0:1]  # (1, 1)
+        fy = self.cam_k[:, 1:2]  # (1, 1)
+        cx = self.cam_k[:, 2:3]  # (1, 1)
+        cy = self.cam_k[:, 3:4]  # (1, 1)
         
         # Back-projection: (u, v, z) -> (X, Y, Z)
-        z_safe = torch.clamp(z_final, min=0.01)  # Evita divisioni per 0
-        pred_x = (pred_2d[:, 0:1] - cx) * z_safe / fx
-        pred_y = (pred_2d[:, 1:2] - cy) * z_safe / fy
+        z_safe = torch.clamp(z_final, min=0.01)  # (B, 1)
+        pred_x = (pred_2d[:, 0:1] - cx) * z_safe / fx  # (B, 1)
+        pred_y = (pred_2d[:, 1:2] - cy) * z_safe / fy  # (B, 1)
         pred_trans = torch.cat([pred_x, pred_y, z_safe], dim=1)  # (B, 3)
         
         # Calcola gt_2d per projection loss
-        fx, fy = self.cam_k[:, 0:1], self.cam_k[:, 1:2]
-        cx, cy = self.cam_k[:, 2:3], self.cam_k[:, 3:4]
         gt_z_safe = torch.clamp(gt_trans[:, 2:3], min=0.001)
         gt_u = (gt_trans[:, 0:1] * fx / gt_z_safe) + cx
         gt_v = (gt_trans[:, 1:2] * fy / gt_z_safe) + cy

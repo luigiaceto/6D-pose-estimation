@@ -72,7 +72,12 @@ def train_one_epoch(
                 z_net=None,                        # Non serve fallback nel training
                 use_bbox_center_only=False        # Usa offset predetto
             )
-            z_geometric = trans_geometric[:, 2:3]  # (B, 1) - Solo la Z
+            
+            # Estrai solo Z - assicurati che sia (B, 1)
+            if trans_geometric.dim() == 2:  # (B, 3)
+                z_geometric = trans_geometric[:, 2:3]  # (B, 1)
+            else:  # (B, 3, 1) - dovrebbe essere impossibile ma per sicurezza
+                z_geometric = trans_geometric[:, 2, :]  # (B, 1)
             
             # 3. Calcola loss con z_geometric + delta_z
             loss_dict = criterion(
@@ -164,7 +169,12 @@ def validate(
                     z_net=None,
                     use_bbox_center_only=False
                 )
-                z_geometric = trans_geometric[:, 2:3]  # (B, 1)
+                
+                # Estrai solo Z - assicurati che sia (B, 1)
+                if trans_geometric.dim() == 2:  # (B, 3)
+                    z_geometric = trans_geometric[:, 2:3]  # (B, 1)
+                else:  # (B, 3, 1)
+                    z_geometric = trans_geometric[:, 2, :]  # (B, 1)
                 
                 # 3. Calcola loss
                 loss_dict = criterion(
