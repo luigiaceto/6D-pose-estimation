@@ -222,6 +222,10 @@ def train(
     weight_decay=1e-5,
     device='cuda',
     freeze_rgb_epochs=5,
+    add_weight = 0.0,
+    proj_weight = 2.0,
+    trans_weight = 100.0,
+    rot_weight = 50.0,
     partial_unfreeze=False,
     resume_from_checkpoint=None,
     reset_training=False 
@@ -233,10 +237,10 @@ def train(
     ).to(device)
 
     criterion = ExtensionLoss(
-        add_weight=0.0,       # Disattiviamo ADD loss per ora
-        proj_weight=10.0,     # Projection Loss in pixel - aiuta convergenza offset (u,v)
-        trans_weight=100.0,   # 🎯 Peso alto per forzare la correzione della Z
-        rot_weight=20.0,      # Peso alto per la rotazione pura
+        add_weight=add_weight,       # Disattiviamo ADD loss per ora
+        proj_weight=proj_weight,     # Projection Loss in pixel - aiuta convergenza offset (u,v)
+        trans_weight=trans_weight,   # 🎯 Peso alto per forzare la correzione della Z
+        rot_weight=rot_weight,      # Peso alto per la rotazione pura
         cam_k=cam_k,
         model_points_dict=points_dict,
         loss_mode='rotation'  # Usa la modalità disaccoppiata
