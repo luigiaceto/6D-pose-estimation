@@ -38,7 +38,7 @@ class ExtensionLoss(nn.Module):
                 symmetry_mask[obj_id] = True
         self.register_buffer('symmetry_lookup', symmetry_mask)
 
-        self.proj_loss_fn = nn.L1Loss()
+        self.proj_loss_fn =  nn.SmoothL1Loss(beta=1.0)
         self.trans_loss_fn = nn.SmoothL1Loss(beta=1.0)
 
         self.w_add = add_weight   
