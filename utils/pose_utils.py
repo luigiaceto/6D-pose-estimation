@@ -77,9 +77,9 @@ def solve_translation_geometric_high_precision(cropped_depth, pred_uv, cam_k, bb
         v_local = delta_uv_crop[:, 1] + (H / 2)
         pred_uv_final = pred_uv
 
-    # 2. Campionamento Adattivo (Kernel Gigante 21x21)
-    # Questo kernel grande aiuta a mediare il rumore del sensore nel centro
-    k_size = 21 
+    # 2. Campionamento Adattivo (Kernel 5x5)
+    # Kernel ridotto per evitare di pescare lo sfondo su oggetti sottili
+    k_size = 5 
     pad = k_size // 2
     
     u_center = torch.clamp(u_local.long(), pad, W - 1 - pad)

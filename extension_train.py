@@ -233,13 +233,13 @@ def train(
     ).to(device)
 
     criterion = ExtensionLoss(
-        add_weight=150.0,      # ADD Loss in cm - dominante per posa 6D finale
-        proj_weight=5,      # Projection Loss in pixel - aiuta convergenza offset (u,v)
-        trans_weight=30.0,    # 🎯 ATTIVO: Trans loss in metri - scala 100x più piccola, peso 100x più alto
-        rot_weight=0.0,       # Rot loss gestita da ADD (già include rotazione)
+        add_weight=0.0,       # Disattiviamo ADD loss per ora
+        proj_weight=10.0,     # Projection Loss in pixel - aiuta convergenza offset (u,v)
+        trans_weight=100.0,   # 🎯 Peso alto per forzare la correzione della Z
+        rot_weight=20.0,      # Peso alto per la rotazione pura
         cam_k=cam_k,
         model_points_dict=points_dict,
-        loss_mode='add'
+        loss_mode='rotation'  # Usa la modalità disaccoppiata
     ).to(device)
 
     params = [
@@ -277,10 +277,30 @@ def train(
         
         if reset_training:
             # 🔥 RESET MODE: Carica solo i pesi, riparte da Epoch 0
-            print(">>> ⚠️ RESET TRAINING ATTIVO: Ignoro epoch e optimizer del checkpoint.")
+            print(">>> ⚠️ RESET TRAINING ATTIVO: Re-inizializzo le HEAD (Z e Rot) e riparto da Epoch 0.")
             print(">>> Si riparte da Epoch 0 con i nuovi Learning Rate.")
             print(f"    - RGB Backbone LR: {lr_rgb_backbone:.2e}")
             print(f"    - New Components LR: {lr_new_components:.2e}")
+            
+            # Re-init Rot Head
+            torch.nn.init.xavier_uniform_(model.rot_head.weight, gain=0.01)
+            model.rot_head.bias.data.fill_(0)
+            model.rot_head.bias.data[0] = 1.0
+            
+            # Re-init Z Head (tutti i layer lineari)
+            for m in model.z_head.modules():
+                if isinstance(m, torch.nn.Linear):
+                    torch.nn.init.xavier_uniform_(m.weight, gain=0.01)
+                    if m.bias is not None:
+                        torch.nn.init.constant_(m.bias, 0.0)
+            
+            # Re-init Offset Head
+            for m in model.offset_head.modules():
+                if isinstance(m, torch.nn.Linear):
+                    torch.nn.init.xavier_uniform_(m.weight, gain=0.01)
+                    if m.bias is not None:
+                        torch.nn.init.constant_(m.bias, 0.0)
+            
             start_epoch = 0
             best_loss = float('inf')
             # Non carichiamo optimizer/scheduler/scaler (usiamo quelli freschi)
@@ -320,17 +340,17 @@ def train(
             
         train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device)
         print(
-            f"  Train Loss: {train_avg_metrics['total_loss_avg']:.4f}, ADD: {train_avg_metrics['add_loss_avg']:.2f}, "
-            f"Trans: {train_avg_metrics['trans_loss_avg']:.2f}, Rot: {train_avg_metrics['rot_loss_avg']:.2f}, Proj: {train_avg_metrics['proj_loss_avg']:.2f} "
-            f"(Rot Err: {train_avg_metrics['rot_err_deg_avg']:.2f}°, Trans Err: {train_avg_metrics['trans_err_cm_avg']:.2f} cm)"
+            f"  Train Loss: {train_avg_metrics['total_loss_avg']:.4f}, ADD: {train_avg_metrics['add_loss_avg']:.4f}, "
+            f"Trans: {train_avg_metrics['trans_loss_avg']:.4f}, Rot: {train_avg_metrics['rot_loss_avg']:.4f}, Proj: {train_avg_metrics['proj_loss_avg']:.4f} "
+            f"(Rot Err: {train_avg_metrics['rot_err_deg_avg']:.4f}°, Trans Err: {train_avg_metrics['trans_err_cm_avg']:.4f} cm)"
         )
 
         val_avg_metrics = validate(model, val_loader, criterion, device)
         
         print(
-            f"  Val Loss: {val_avg_metrics['total_loss_avg']:.4f}, ADD: {val_avg_metrics['add_loss_avg']:.2f}, "
-            f"Trans: {val_avg_metrics['trans_loss_avg']:.2f}, Rot: {val_avg_metrics['rot_loss_avg']:.2f}, Proj: {val_avg_metrics['proj_loss_avg']:.2f} "
-            f"(Rot Err: {val_avg_metrics['rot_err_deg_avg']:.2f}°, Trans Err: {val_avg_metrics['trans_err_cm_avg']:.2f} cm)"
+            f"  Val Loss: {val_avg_metrics['total_loss_avg']:.4f}, ADD: {val_avg_metrics['add_loss_avg']:.4f}, "
+            f"Trans: {val_avg_metrics['trans_loss_avg']:.4f}, Rot: {val_avg_metrics['rot_loss_avg']:.4f}, Proj: {val_avg_metrics['proj_loss_avg']:.4f} "
+            f"(Rot Err: {val_avg_metrics['rot_err_deg_avg']:.4f}°, Trans Err: {val_avg_metrics['trans_err_cm_avg']:.4f} cm)"
         )
 
         scheduler.step(val_avg_metrics['total_loss_avg'])
