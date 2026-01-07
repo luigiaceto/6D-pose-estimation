@@ -18,7 +18,7 @@ class ExtensionLoss(nn.Module):
     """
     
     def __init__(self, add_weight, proj_weight, cam_k, model_points_dict, rot_weight=0.0, trans_weight=0.0, loss_mode='add'):
-        super(ExtensionLoss, self).__init__()
+        super().__init__()
 
         self.register_buffer(
             'cam_k',
@@ -107,23 +107,8 @@ class ExtensionLoss(nn.Module):
             total_loss = self.w_add * loss_add + self.w_proj * loss_proj + self.w_trans * loss_trans_pure
         
         else:
-            batch_points = self.model_points_bank[class_ids.long()]
-            pred_R = quaternion_to_rotation_matrix(pred_quat)
-            gt_R = quaternion_to_rotation_matrix(gt_quat)
-            pred_t = pred_trans.unsqueeze(2)
-            gt_t = gt_trans.unsqueeze(2)
-            
-            losses = batch_add_loss(pred_R, pred_t, gt_R, gt_t, batch_points)
-            for i, cid in enumerate(class_ids):
-                if cid.item() in SYMMETRIC_OBJECTS:
-                    l_adds = batch_adds_loss(
-                        pred_R[i:i+1], pred_t[i:i+1], 
-                        gt_R[i:i+1], gt_t[i:i+1], 
-                        batch_points[i:i+1]
-                    )
-                    losses[i] = l_adds
-            loss_add = torch.mean(losses)
-            
+            # 🎯 ROTATION MODE: Focus su rotazione + projection + translation
+            # Calcola rotation loss (quaternion per asimmetrici, geodesic per simmetrici)
             rot_losses = []
             for i, cid in enumerate(class_ids):
                 if cid.item() in SYMMETRIC_OBJECTS:
@@ -133,9 +118,17 @@ class ExtensionLoss(nn.Module):
                 rot_losses.append(l)
             loss_rot = torch.mean(torch.stack(rot_losses))
             
-            loss_proj = torch.tensor(0.0, device=pred_quat.device)
+            # Calcola projection loss (guida l'offset 2D)
+            loss_proj = self.proj_loss_fn(pred_2d, gt_2d_target)
+            
+            # Calcola translation loss (guida delta_z)
             loss_trans_pure = self.trans_loss_fn(pred_trans, gt_trans)
-            total_loss = self.w_add * loss_add + self.w_rot * loss_rot + self.w_trans * loss_trans_pure
+            
+            # ADD loss non usata in questo mode
+            loss_add = torch.tensor(0.0, device=pred_quat.device)
+            
+            # Total loss: rotation + projection + translation
+            total_loss = self.w_rot * loss_rot + self.w_proj * loss_proj + self.w_trans * loss_trans_pure
         
         with torch.no_grad(): 
             trans_err_cm = torch.norm(pred_trans - gt_trans, p=2, dim=1).mean() * 100

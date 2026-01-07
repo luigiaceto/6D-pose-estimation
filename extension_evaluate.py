@@ -72,25 +72,38 @@ def evaluate_extension_batch(
             if net_input_depth.mean() > 10.0:
                 net_input_depth = net_input_depth / 1000.0
 
-            # Forward
-            pred_quat, pred_trans_net, pred_uv = model(rgb, net_input_depth, bbox_center, bbox_dims)
+            # Forward - MODELLO ORA RESTITUISCE (quaternion, delta_z, uv)
+            pred_quat, pred_delta_z, pred_uv = model(rgb, net_input_depth, bbox_center, bbox_dims)
             
-            # 🎯 SOVRASCRIVI TRASLAZIONE CON SOLVER GEOMETRICO ROBUSTO (Mediana su Crop)
-            # Usa la depth map croppata già in memoria - MOLTO più robusto del singolo pixel
+            # 🎯 RESIDUAL LEARNING: Z_final = Z_geometric + Delta_Z
             cam_k_tensor = torch.tensor([cam_k[0], cam_k[4], cam_k[2], cam_k[5]], device=device).unsqueeze(0)
             cam_k_batch = cam_k_tensor.repeat(len(pred_quat), 1)
             
-            # >>> SOLVER ROBUSTO: Mediana 21x21 invece di singolo pixel rumoroso
-            # NON aggiungere raggio (errore geometrico su oggetti non sferici)
-            pred_trans = solve_translation_geometric_high_precision(
+            # 1. Calcola Z_geometric robusto (mediana 21x21)
+            trans_geometric = solve_translation_geometric_high_precision(
                 cropped_depth=depth,        # Tensore (B, 1, H, W) dal dataloader
                 pred_uv=pred_uv,            # Centro (u,v) predetto dalla rete
                 cam_k=cam_k_batch,
                 bbox_center=bbox_center,
                 bbox_dims=bbox_dims,
-                z_net=pred_trans_net[:, 2:3],  # Fallback sulla rete se depth vuota
+                z_net=None,  # Durante evaluation, non usiamo fallback
                 use_bbox_center_only=False     # USA l'offset predetto (importante!)
             )
+            
+            # 2. Estrai Z e aggiungi correzione rete
+            if trans_geometric.dim() == 2:  # (B, 3)
+                z_geometric = trans_geometric[:, 2:3]  # (B, 1)
+            else:  # (B, 3, 1)
+                z_geometric = trans_geometric[:, 2, :]  # (B, 1)
+                
+            z_final = z_geometric + pred_delta_z  # (B, 1)
+            
+            # 3. Back-projection completa per ottenere pred_trans
+            fx, fy, cx, cy = cam_k_batch[:, 0:1], cam_k_batch[:, 1:2], cam_k_batch[:, 2:3], cam_k_batch[:, 3:4]
+            z_safe = torch.clamp(z_final, min=0.01)
+            pred_x = (pred_uv[:, 0:1] - cx) * z_safe / fx
+            pred_y = (pred_uv[:, 1:2] - cy) * z_safe / fy
+            pred_trans = torch.cat([pred_x, pred_y, z_safe], dim=1)  # (B, 3)
             
             pred_rot_matrix = quaternion_to_rotation_matrix(pred_quat) # (B, 3, 3)
             

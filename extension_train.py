@@ -233,9 +233,9 @@ def train(
     ).to(device)
 
     criterion = ExtensionLoss(
-        add_weight=100.0,      # ADD Loss in cm - dominante per posa 6D finale
-        proj_weight=0.2,      # Projection Loss in pixel - aiuta convergenza offset (u,v)
-        trans_weight=200.0,    # 🎯 ATTIVO: Trans loss in metri - scala 100x più piccola, peso 100x più alto
+        add_weight=150.0,      # ADD Loss in cm - dominante per posa 6D finale
+        proj_weight=5,      # Projection Loss in pixel - aiuta convergenza offset (u,v)
+        trans_weight=30.0,    # 🎯 ATTIVO: Trans loss in metri - scala 100x più piccola, peso 100x più alto
         rot_weight=0.0,       # Rot loss gestita da ADD (già include rotazione)
         cam_k=cam_k,
         model_points_dict=points_dict,

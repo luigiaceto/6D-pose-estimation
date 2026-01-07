@@ -196,16 +196,47 @@ def visualize_fusion_predictions(
             center_y = y_min + (y_max - y_min) / 2.0
             tensor_center = torch.tensor([[center_x, center_y]], dtype=torch.float32).to(device)
             
-            # --- E. Inference ---
+            # --- E. Inference con Residual Learning ---
             with torch.no_grad():
-                # Forward Pass: RGB + Depth + Center -> Quaternion + Translation
-                pred_quat, pred_trans, pred_2d = pose_model(tensor_rgb, tensor_depth, tensor_center, tensor_bbox_dims)
+                # Forward Pass: RGB + Depth + Center -> Quaternion + Delta_Z + UV
+                pred_quat, pred_delta_z, pred_uv = pose_model(tensor_rgb, tensor_depth, tensor_center, tensor_bbox_dims)
+                
+                # Ricostruisci translation con residual learning
+                from utils.pose_utils import solve_translation_geometric_high_precision
+                
+                cam_k_tensor = torch.tensor([cam_k[0], cam_k[4], cam_k[2], cam_k[5]], device=device).unsqueeze(0)
+                
+                # Calcola Z geometrico robusto
+                trans_geometric = solve_translation_geometric_high_precision(
+                    cropped_depth=tensor_depth,
+                    pred_uv=pred_uv,
+                    cam_k=cam_k_tensor,
+                    bbox_center=tensor_center,
+                    bbox_dims=tensor_bbox_dims,
+                    z_net=None,
+                    use_bbox_center_only=False
+                )
+                
+                # Estrai Z e applica correzione
+                if trans_geometric.dim() == 2:  # (B, 3)
+                    z_geometric = trans_geometric[:, 2:3]
+                else:  # (B, 3, 1)
+                    z_geometric = trans_geometric[:, 2, :]
+                    
+                z_final = z_geometric + pred_delta_z  # (1, 1)
+                
+                # Back-projection completa
+                fx, fy, cx, cy = cam_k_tensor[:, 0:1], cam_k_tensor[:, 1:2], cam_k_tensor[:, 2:3], cam_k_tensor[:, 3:4]
+                z_safe = torch.clamp(z_final, min=0.01)
+                pred_x = (pred_uv[:, 0:1] - cx) * z_safe / fx
+                pred_y = (pred_uv[:, 1:2] - cy) * z_safe / fy
+                pred_trans = torch.cat([pred_x, pred_y, z_safe], dim=1)  # (1, 3)
             
             # Conversioni per visualizzazione
             pred_t_np = pred_trans[0].cpu().numpy() # [x, y, z] in metri
             pred_q_np = pred_quat[0].cpu().numpy()
             pred_R_np = quaternion_to_rotation_matrix(pred_quat)[0].cpu().numpy()
-            pred_uv_np = pred_2d[0].cpu().numpy() # serve ???
+            pred_uv_np = pred_uv[0].cpu().numpy()
             
             # --- F. Recupera Ground Truth ---
             class_id = int(boxes.cls[i])

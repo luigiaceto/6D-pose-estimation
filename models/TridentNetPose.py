@@ -2,8 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
-from models.PinholeCamera import PinholeCamera
-
+from utils.pose_utils import IMG_HEIGHT, IMG_WIDTH
 
 class DepthEncoder(nn.Module):
     """
@@ -149,24 +148,21 @@ class TridentNetPose(nn.Module):
         # Delta_Z sarà combinato con Z_geometric nella loss
         delta_z = self.z_head(fused)  # (B, 1) - delta in metri (può essere +/-)
         
-        # Nota: Se z_pred diventa troppo piccolo/grande, gradient clipping lo gestisce
-
-        # ** Offset per u & v **
-        delta_uv = self.offset_head(fused) # (B, 2)
-        uv = bbox_center_pixel + delta_uv
-        delta_uv_percent = self.offset_head(fused) # (B, 2)
-        # ALTERNATIVA
-        #IMG_W = 640.0
-        #IMG_H = 480.0
-        #img_size = torch.tensor([IMG_W, IMG_H], device=bbox_dims.device).view(1, 2)
-        #bbox_size_px = bbox_dims * img_size
-        #delta_uv_px = delta_uv_percent * bbox_size_px
-        #uv = bbox_center_pixel + delta_uv_px
+        # ** Offset Scale-Invariant (Percentuale del BBox) **
+        # La rete predice offset come percentuale delle dimensioni del bbox
+        delta_pct = self.offset_head(fused)  # (B, 2) - valori interpretati come percentuale
+        
+        
+        offset_px_x = delta_pct[:, 0:1] * bbox_dims[:, 0:1] * IMG_WIDTH  # (B, 1)
+        offset_px_y = delta_pct[:, 1:2] * bbox_dims[:, 1:2] * IMG_HEIGHT  # (B, 1)
+        offset_px = torch.cat([offset_px_x, offset_px_y], dim=1)     # (B, 2)
+        
+        # Somma l'offset al centro del bbox per ottenere coordinate uv finali
+        uv = bbox_center_pixel + offset_px  # (B, 2)
 
         # 🎯 HYBRID APPROACH: Restituisci delta_z (non translation completa)
         # La translation finale sarà z_geometric + delta_z (calcolata nella loss)
         return quaternion, delta_z, uv  # [quaternion, delta_z (residual), centro 2D]
-        # N.B. ⚠⚠⚠ CONVIENE COMUNQUE RESTITUIRE ANCHE TRANS PER UN FATTO DI COMODITA' AD INFERENCE TIME ⚠⚠⚠
 
     def freeze_rgb(self):
         for param in self.rgb_backbone.parameters():
