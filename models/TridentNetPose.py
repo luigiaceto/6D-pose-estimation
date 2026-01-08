@@ -79,11 +79,12 @@ class TridentNetPose(nn.Module):
         # --- Head Rotazione ---
         self.rot_head = nn.Linear(1024, 4) # Output: 4 quaternioni
         
-        # --- Head Depth (Z) - RESIDUAL LEARNING ---
+        # --- Head Depth (Z) - RESIDUAL LEARNING + GEOMETRIC INJECTION ---
         # Invece di predire Z assoluta, predice un DELTA (correzione skin-to-heart)
         # Inizializzazione vicino a 0 così all'inizio si affida alla geometria
+        # +1 nella input_dim per accettare z_geometric concatenato
         self.z_head = nn.Sequential(
-            nn.Linear(1024, 128),
+            nn.Linear(1025, 128),  # 1024 (fused features) + 1 (z_geometric normalizzato)
             nn.ReLU(),
             nn.Dropout(0.2),
             nn.Linear(128, 1)  # Output: Delta_Z (metri) - correzione da applicare a Z_geometric
@@ -122,11 +123,12 @@ class TridentNetPose(nn.Module):
             self.rot_head.bias.fill_(0)
             self.rot_head.bias[0] = 1.0
 
-    def forward(self, rgb, depth, bbox_center_pixel, bbox_dims):
+    def forward(self, rgb, depth, bbox_center_pixel, bbox_dims, z_geometric=None):
         """
         rgb: (B, 3, 224, 224)
         depth: (B, 1, 224, 224)
         bbox_center_pixel: (B, 2) -> [u, v]
+        z_geometric: (B, 1) -> Profondità geometrica (opzionale, per Geometric Injection)
         """
         
         # --- Feature Extraction ---
@@ -143,10 +145,20 @@ class TridentNetPose(nn.Module):
         quaternion = self.rot_head(fused)
         quaternion = F.normalize(quaternion, p=2, dim=1)
         
-        # ** Depth Z - RESIDUAL DELTA **
+        # ** Depth Z - RESIDUAL DELTA + GEOMETRIC INJECTION **
+        # Se z_geometric è fornito, lo concateniamo alle features
+        if z_geometric is not None:
+            # Normalizza z_geometric (dividendo per 2.0 come fattore di scala grezzo)
+            z_norm = z_geometric / 2.0  # (B, 1)
+            fused_z = torch.cat([fused, z_norm], dim=1)  # (B, 1025)
+        else:
+            # Fallback: se z_geometric non è fornito, aggiungi uno zero
+            z_dummy = torch.zeros(fused.size(0), 1, device=fused.device)
+            fused_z = torch.cat([fused, z_dummy], dim=1)  # (B, 1025)
+        
         # La rete predice solo un DELTA (correzione), non un valore assoluto
         # Delta_Z sarà combinato con Z_geometric nella loss
-        delta_z = self.z_head(fused)  # (B, 1) - delta in metri (può essere +/-)
+        delta_z = self.z_head(fused_z)  # (B, 1) - delta in metri (può essere +/-)
         
         # ** Offset Scale-Invariant (Percentuale del BBox) **
         # La rete predice offset come percentuale delle dimensioni del bbox

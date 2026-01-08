@@ -14,17 +14,32 @@ def train_one_epoch(
         criterion,
         optimizer,
         scaler,
-        device
+        device,
+        current_epoch=0  # Nuovo parametro per sapere l'epoca corrente
     ):
 
-    # 🔥 MODALITÀ HYBRID HARDCODED: Congela backbone ma addestra heads
-    model.eval()  # Congela tutto (BatchNorm, Dropout)
+    # 🔥 FINE-TUNING AGGRESSIVO: Scongela TUTTE le teste
+    model.eval()  # Congela backbone (BatchNorm, Dropout)
     
-    # Riattiva SOLO le parti che devono imparare
+    # Riattiva TUTTE le parti che devono imparare
     model.fusion_fc.train()
     model.z_head.train()
     model.offset_head.train()
-    # model.rot_head.train()  # Lascia commentato se non vuoi toccare la rotazione
+    model.rot_head.train()  # 🎯 SCONGELATO per fine-tuning aggressivo
+    
+    # 🎯 LOSS DINAMICA: Se siamo oltre l'epoca 0, aggiusta i pesi in-flight
+    if current_epoch > 0:
+        print(f"🔄 LOSS DINAMICA ATTIVA (Epoch {current_epoch}):")
+        print(f"   w_rot: {criterion.w_rot:.2f} → 0.2")
+        print(f"   w_trans: {criterion.w_trans:.2f} → 1.0")
+        print(f"   w_add: {criterion.w_add:.2f} → 0.5")
+        criterion.w_rot = 0.2
+        criterion.w_trans = 1.0
+        criterion.w_add = 0.5
+    
+    # Conferma teste in training
+    print(f"📊 Training Heads: fusion_fc={model.fusion_fc.training}, z_head={model.z_head.training}, "
+          f"offset_head={model.offset_head.training}, rot_head={model.rot_head.training}")
     
     # Inizializzazione Accumulatori
     total_loss_sum = 0
@@ -342,7 +357,7 @@ def train(
             optimizer.param_groups[0]['lr'] = lr_rgb_backbone
             print(f">>> 🔓 RGB Backbone Unfrozen (LR reset to {lr_rgb_backbone:.2e})")
             
-        train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device)
+        train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device, current_epoch=epoch)
         print(
             f"  Train Loss: {train_avg_metrics['total_loss_avg']:.4f}, ADD: {train_avg_metrics['add_loss_avg']:.4f}, "
             f"Trans: {train_avg_metrics['trans_loss_avg']:.4f}, Rot: {train_avg_metrics['rot_loss_avg']:.4f}, Proj: {train_avg_metrics['proj_loss_avg']:.4f} "
