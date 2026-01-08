@@ -15,7 +15,6 @@ def train_one_epoch(
         optimizer,
         scaler,
         device,
-        current_epoch=0  # Nuovo parametro per sapere l'epoca corrente
     ):
 
     # 🔥 FINE-TUNING AGGRESSIVO: Scongela TUTTE le teste
@@ -25,17 +24,7 @@ def train_one_epoch(
     model.fusion_fc.train()
     model.z_head.train()
     model.offset_head.train()
-    model.rot_head.train()  # 🎯 SCONGELATO per fine-tuning aggressivo
-    
-    # 🎯 LOSS DINAMICA: Se siamo oltre l'epoca 0, aggiusta i pesi in-flight
-    if current_epoch > 0:
-        print(f"🔄 LOSS DINAMICA ATTIVA (Epoch {current_epoch}):")
-        print(f"   w_rot: {criterion.w_rot:.2f} → 0.2")
-        print(f"   w_trans: {criterion.w_trans:.2f} → 1.0")
-        print(f"   w_add: {criterion.w_add:.2f} → 0.5")
-        criterion.w_rot = 0.2
-        criterion.w_trans = 1.0
-        criterion.w_add = 0.5
+    model.rot_head.train() 
     
     # Conferma teste in training
     print(f"📊 Training Heads: fusion_fc={model.fusion_fc.training}, z_head={model.z_head.training}, "
@@ -237,28 +226,49 @@ def train(
     weight_decay=1e-5,
     device='cuda',
     freeze_rgb_epochs=5,
-    add_weight = 0.0,
-    proj_weight = 2.0,
-    trans_weight = 100.0,
-    rot_weight = 50.0,
+    add_weight=0.0,      # float o tuple (start, end)
+    proj_weight=2.0,     # float o tuple (start, end)
+    trans_weight=100.0,  # float o tuple (start, end)
+    rot_weight=50.0,     # float o tuple (start, end)
+    switch_epoch=40,     # Epoca in cui switchare i pesi (per Curriculum Learning)
     partial_unfreeze=False,
     resume_from_checkpoint=None,
     reset_training=False 
 ):
+    """
+    Training con supporto per Curriculum Learning.
+    
+    I parametri *_weight possono essere:
+    - float: peso costante per tutto il training
+    - tuple/list (start, end): peso cambia da start a end all'epoca switch_epoch
+    """
+    # Helper function per gestire pesi float o tuple
+    def get_weight_value(weight, epoch, switch_epoch):
+        """Ritorna il valore del peso in base all'epoca corrente."""
+        if isinstance(weight, (tuple, list)):
+            return weight[0] if epoch < switch_epoch else weight[1]
+        else:
+            return weight
+    
     points_dict = load_all_models_points(dataset_root, num_points=1000)
 
     model = TridentNetPose(
         cam_k=cam_k
     ).to(device)
 
+    # Inizializza loss con i valori iniziali (epoca 0)
+    init_add_weight = get_weight_value(add_weight, 0, switch_epoch)
+    init_proj_weight = get_weight_value(proj_weight, 0, switch_epoch)
+    init_trans_weight = get_weight_value(trans_weight, 0, switch_epoch)
+    init_rot_weight = get_weight_value(rot_weight, 0, switch_epoch)
+    
     criterion = ExtensionLoss(
-        add_weight=add_weight,       # Disattiviamo ADD loss per ora
-        proj_weight=proj_weight,     # Projection Loss in pixel - aiuta convergenza offset (u,v)
-        trans_weight=trans_weight,   # 🎯 Peso alto per forzare la correzione della Z
-        rot_weight=rot_weight,      # Peso alto per la rotazione pura
+        add_weight=init_add_weight,
+        proj_weight=init_proj_weight,
+        trans_weight=init_trans_weight,
+        rot_weight=init_rot_weight,
         cam_k=cam_k,
         model_points_dict=points_dict,
-        loss_mode='rotation'  # Usa la modalità disaccoppiata
     ).to(device)
 
     params = [
@@ -342,6 +352,31 @@ def train(
     
     for epoch in range(start_epoch, epochs):
         print(f"\nEpoch {epoch+1}/{epochs}")
+        
+        # 🎯 CURRICULUM LEARNING: Aggiorna pesi dinamicamente
+        current_add = get_weight_value(add_weight, epoch, switch_epoch)
+        current_proj = get_weight_value(proj_weight, epoch, switch_epoch)
+        current_trans = get_weight_value(trans_weight, epoch, switch_epoch)
+        current_rot = get_weight_value(rot_weight, epoch, switch_epoch)
+        
+        # Notifica switch se siamo esattamente all'epoca di cambio
+        if epoch == switch_epoch:
+            print(f"\n🔄 CURRICULUM SWITCH @ Epoch {epoch+1}:")
+            if isinstance(add_weight, (tuple, list)):
+                print(f"   ADD:   {add_weight[0]:.2f} → {add_weight[1]:.2f}")
+            if isinstance(proj_weight, (tuple, list)):
+                print(f"   PROJ:  {proj_weight[0]:.2f} → {proj_weight[1]:.2f}")
+            if isinstance(trans_weight, (tuple, list)):
+                print(f"   TRANS: {trans_weight[0]:.2f} → {trans_weight[1]:.2f}")
+            if isinstance(rot_weight, (tuple, list)):
+                print(f"   ROT:   {rot_weight[0]:.2f} → {rot_weight[1]:.2f}")
+            print()
+        
+        # Aggiorna pesi nella criterion
+        criterion.w_add = current_add
+        criterion.w_proj = current_proj
+        criterion.w_trans = current_trans
+        criterion.w_rot = current_rot
 
         # Stampa LR dinamicamente in base al numero di gruppi
         if len(optimizer.param_groups) > 0:

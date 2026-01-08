@@ -10,16 +10,11 @@ from utils.pose_utils import (
     SYMMETRIC_OBJECTS
 )
 
-
 class ExtensionLoss(nn.Module):
-    """
-    Loss ottimizzata per RGB-D Pose Estimation (Extension).
-    Loss PULITA senza pesi per classe (Robin Hood rimosso).
-    """
-    
-    def __init__(self, add_weight, proj_weight, cam_k, model_points_dict, rot_weight=0.0, trans_weight=0.0, loss_mode='add'):
+    def __init__(self, add_weight, proj_weight, cam_k, model_points_dict, rot_weight=0.0, trans_weight=0.0):
         super().__init__()
 
+        # Register buffers (non-trainable params)
         self.register_buffer(
             'cam_k',
             (torch.tensor([cam_k[0], cam_k[4], cam_k[2], cam_k[5]])).view(1, 4)
@@ -38,59 +33,68 @@ class ExtensionLoss(nn.Module):
                 symmetry_mask[obj_id] = True
         self.register_buffer('symmetry_lookup', symmetry_mask)
 
-        self.proj_loss_fn =  nn.SmoothL1Loss(beta=1.0)
+        # Loss functions base
+        self.proj_loss_fn = nn.SmoothL1Loss(beta=1.0)
         self.trans_loss_fn = nn.SmoothL1Loss(beta=1.0)
 
+        # Pesi iniziali (modificabili runtime)
         self.w_add = add_weight   
         self.w_proj = proj_weight
         self.w_rot = rot_weight
         self.w_trans = trans_weight
-        self.loss_mode = loss_mode
-        
-        if loss_mode not in ['add', 'rotation']:
-            raise ValueError(f"loss_mode deve essere 'add' o 'rotation', ricevuto: {loss_mode}")
-
 
     def forward(self, pred_quat, pred_delta_z, gt_quat, gt_trans, pred_2d, class_ids, z_geometric):
-        """
-        Args:
-            pred_quat: (B, 4) quaternion predetto
-            pred_delta_z: (B, 1) DELTA Z predetto dalla rete (correzione)
-            gt_quat: (B, 4) quaternion GT
-            gt_trans: (B, 3) translation GT
-            pred_2d: (B, 2) coordinate 2D predette (u, v)
-            class_ids: (B,) ID oggetti
-            z_geometric: (B, 1) profondità calcolata geometricamente (DETACHED)
-        """
-        # 🎯 HYBRID DEPTH: Z_finale = Z_geometric (robusto) + Delta_Z (correzione rete)
-        z_final = z_geometric.detach() + pred_delta_z  # (B, 1)
+        # 1. Ricostruzione 3D (Hybrid Depth)
+        z_final = z_geometric.detach() + pred_delta_z
+        z_safe = torch.clamp(z_final, min=0.01)
         
-        # Ricostruisci translation completa usando z_final
-        fx = self.cam_k[:, 0:1]  # (1, 1)
-        fy = self.cam_k[:, 1:2]  # (1, 1)
-        cx = self.cam_k[:, 2:3]  # (1, 1)
-        cy = self.cam_k[:, 3:4]  # (1, 1)
+        fx, fy = self.cam_k[:, 0:1], self.cam_k[:, 1:2]
+        cx, cy = self.cam_k[:, 2:3], self.cam_k[:, 3:4]
         
-        # Back-projection: (u, v, z) -> (X, Y, Z)
-        z_safe = torch.clamp(z_final, min=0.01)  # (B, 1)
-        pred_x = (pred_2d[:, 0:1] - cx) * z_safe / fx  # (B, 1)
-        pred_y = (pred_2d[:, 1:2] - cy) * z_safe / fy  # (B, 1)
-        pred_trans = torch.cat([pred_x, pred_y, z_safe], dim=1)  # (B, 3)
-        
-        # Calcola gt_2d per projection loss
+        pred_x = (pred_2d[:, 0:1] - cx) * z_safe / fx
+        pred_y = (pred_2d[:, 1:2] - cy) * z_safe / fy
+        pred_trans = torch.cat([pred_x, pred_y, z_safe], dim=1)
+
+        # 2. Target 2D (per Projection Loss)
         gt_z_safe = torch.clamp(gt_trans[:, 2:3], min=0.001)
         gt_u = (gt_trans[:, 0:1] * fx / gt_z_safe) + cx
         gt_v = (gt_trans[:, 1:2] * fy / gt_z_safe) + cy
         gt_2d_target = torch.cat([gt_u, gt_v], dim=1)
+
+        # --- CALCOLO LOSSES ---
+
+        # A. Rotation Loss (Sempre calcolata per log, applicata se w_rot > 0)
+        rot_losses = []
+        for i, cid in enumerate(class_ids):
+            if cid.item() in SYMMETRIC_OBJECTS:
+                # Geodesic loss per simmetrici (più robusta)
+                l = compute_matrix_geodesic_loss(pred_quat[i:i+1], gt_quat[i:i+1])
+            else:
+                # Quaternion loss standard
+                l = compute_quaternion_loss(pred_quat[i:i+1], gt_quat[i:i+1])
+            rot_losses.append(l)
+        loss_rot = torch.mean(torch.stack(rot_losses))
+
+        # B. Translation & Projection Losses
+        loss_trans_pure = self.trans_loss_fn(pred_trans, gt_trans)
+        loss_proj = self.proj_loss_fn(pred_2d, gt_2d_target)
+
+        # C. ADD Loss (Calcolata solo se serve o per logging leggero)
+        # Nota: ADD è computazionalmente pesante, la calcoliamo se ha peso > 0
+        loss_add = torch.tensor(0.0, device=pred_quat.device)
         
-        if self.loss_mode == 'add':
+        # Se w_add > 0 OPPURE siamo in validation (vogliamo vederla nei log)
+        # Per training veloce, calcola solo se w_add > 0
+        if self.w_add > 0 or not self.training:
             batch_points = self.model_points_bank[class_ids.long()]
             pred_R = quaternion_to_rotation_matrix(pred_quat)
             gt_R = quaternion_to_rotation_matrix(gt_quat)
             pred_t = pred_trans.unsqueeze(2)
             gt_t = gt_trans.unsqueeze(2)
-
+            
             losses = batch_add_loss(pred_R, pred_t, gt_R, gt_t, batch_points)
+            
+            # Gestione Simmetria ADD-S
             for i, cid in enumerate(class_ids):
                 if cid.item() in SYMMETRIC_OBJECTS:
                     l_adds = batch_adds_loss(
@@ -99,62 +103,22 @@ class ExtensionLoss(nn.Module):
                         batch_points[i:i+1]
                     )
                     losses[i] = l_adds
-
             loss_add = torch.mean(losses)
-            loss_proj = self.proj_loss_fn(pred_2d, gt_2d_target)
-            loss_rot = torch.tensor(0.0, device=pred_quat.device)
-            loss_trans_pure = self.trans_loss_fn(pred_trans, gt_trans)
-            total_loss = self.w_add * loss_add + self.w_proj * loss_proj + self.w_trans * loss_trans_pure
-        
-        else:
-            # 🎯 ROTATION MODE: Focus su rotazione + projection + translation
-            # Calcola rotation loss (quaternion per asimmetrici, geodesic per simmetrici)
-            rot_losses = []
-            for i, cid in enumerate(class_ids):
-                if cid.item() in SYMMETRIC_OBJECTS:
-                    l = compute_matrix_geodesic_loss(pred_quat[i:i+1], gt_quat[i:i+1])
-                else:
-                    l = compute_quaternion_loss(pred_quat[i:i+1], gt_quat[i:i+1])
-                rot_losses.append(l)
-            loss_rot = torch.mean(torch.stack(rot_losses))
-            
-            # Calcola projection loss (guida l'offset 2D)
-            loss_proj = self.proj_loss_fn(pred_2d, gt_2d_target)
-            
-            # Calcola translation loss (guida delta_z)
-            loss_trans_pure = self.trans_loss_fn(pred_trans, gt_trans)
-            
-            # Calcola ADD loss se richiesta (w_add > 0)
-            if self.w_add > 0:
-                batch_points = self.model_points_bank[class_ids.long()]
-                pred_R = quaternion_to_rotation_matrix(pred_quat)
-                gt_R = quaternion_to_rotation_matrix(gt_quat)
-                pred_t = pred_trans.unsqueeze(2)  # pred_trans già include z_geometric + pred_delta_z
-                gt_t = gt_trans.unsqueeze(2)
-                
-                # Calcola ADD/ADD-S in base alla simmetria
-                losses = batch_add_loss(pred_R, pred_t, gt_R, gt_t, batch_points)
-                for i, cid in enumerate(class_ids):
-                    if cid.item() in SYMMETRIC_OBJECTS:
-                        l_adds = batch_adds_loss(
-                            pred_R[i:i+1], pred_t[i:i+1], 
-                            gt_R[i:i+1], gt_t[i:i+1], 
-                            batch_points[i:i+1]
-                        )
-                        losses[i] = l_adds
-                
-                loss_add = torch.mean(losses)
-            else:
-                loss_add = torch.tensor(0.0, device=pred_quat.device)
-            
-            # Total loss: rotation + projection + translation + ADD (se attiva)
-            total_loss = self.w_rot * loss_rot + self.w_proj * loss_proj + self.w_trans * loss_trans_pure + self.w_add * loss_add
-        
-        with torch.no_grad(): 
+
+        # --- SOMMA PESATA ---
+        total_loss = (
+            self.w_rot * loss_rot + 
+            self.w_trans * loss_trans_pure + 
+            self.w_proj * loss_proj + 
+            self.w_add * loss_add
+        )
+
+        # --- METRICHE PER LOGGING ---
+        with torch.no_grad():
             trans_err_cm = torch.norm(pred_trans - gt_trans, p=2, dim=1).mean() * 100
             proj_err_px = torch.norm(pred_2d - gt_2d_target, p=2, dim=1).mean()
             rot_err_deg = compute_batch_rotation_error_asymm(pred_quat, gt_quat, class_ids, self.symmetry_lookup)
-        
+
         return {
             'total_loss': total_loss,
             'add_loss': loss_add.detach(),
