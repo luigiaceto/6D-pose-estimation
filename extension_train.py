@@ -30,15 +30,14 @@ def train_one_epoch(
     print(f"📊 Training Heads: fusion_fc={model.fusion_fc.training}, z_head={model.z_head.training}, "
           f"offset_head={model.offset_head.training}, rot_head={model.rot_head.training}")
     
-    # Inizializzazione Accumulatori
+    # Inizializzazione Accumulatori (solo loss geometriche)
     total_loss_sum = 0
-    add_loss_sum = 0
-    proj_loss_sum = 0
-    rot_loss_sum = 0
-    trans_loss_sum = 0       # 🎯 TRANS LOSS
+    rot_loss_sum = 0          # Centered ADD/ADD-S
+    trans_loss_sum = 0        # Pure Translation L1
+    proj_loss_sum = 0         # 2D Projection
     trans_err_cm_sum = 0
     proj_err_px_sum = 0
-    rot_err_deg_sum = 0      # <--- Nome corretto inizializzato
+    rot_err_deg_sum = 0
     
     pbar = tqdm(loader, desc="** Training **")
     for batch in pbar:
@@ -102,22 +101,20 @@ def train_one_epoch(
         scaler.step(optimizer)
         scaler.update()
         
-        # logging
+        # logging (solo loss geometriche)
         total_loss_sum += loss.item()
-        add_loss_sum += loss_dict['add_loss'].item()
-        proj_loss_sum += loss_dict['proj_loss'].item()
         rot_loss_sum += loss_dict['rot_loss'].item()
         trans_loss_sum += loss_dict['trans_loss'].item()
+        proj_loss_sum += loss_dict['proj_loss'].item()
         trans_err_cm_sum += loss_dict['trans_err_cm'].item()
         proj_err_px_sum += loss_dict['proj_err_px'].item()
-        rot_err_deg_sum += loss_dict['rot_err_asymm_deg'] 
+        rot_err_deg_sum += loss_dict['rot_err_deg'] 
     
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
-        'add_loss_avg': add_loss_sum / len(loader),
-        'proj_loss_avg': proj_loss_sum / len(loader),
         'rot_loss_avg': rot_loss_sum / len(loader),
         'trans_loss_avg': trans_loss_sum / len(loader),
+        'proj_loss_avg': proj_loss_sum / len(loader),
         'trans_err_cm_avg': trans_err_cm_sum / len(loader),
         'proj_err_px_avg': proj_err_px_sum / len(loader),
         'rot_err_deg_avg': rot_err_deg_sum / len(loader)
@@ -134,11 +131,11 @@ def validate(
 
     model.eval()
     
+    # Inizializzazione accumulatori (solo loss geometriche)
     total_loss_sum = 0
-    add_loss_sum = 0
-    proj_loss_sum = 0
     rot_loss_sum = 0
-    trans_loss_sum = 0  # 🎯 TRANS LOSS
+    trans_loss_sum = 0
+    proj_loss_sum = 0
     trans_err_cm_sum = 0
     proj_err_px_sum = 0
     rot_err_deg_sum = 0
@@ -191,22 +188,20 @@ def validate(
                     z_geometric=z_geometric        # 🎯 Base geometrica
                 )
             
-            # logging
+            # logging (solo loss geometriche)
             total_loss_sum += loss_dict['total_loss']
-            add_loss_sum += loss_dict['add_loss'].item()
-            proj_loss_sum += loss_dict['proj_loss'].item()
             rot_loss_sum += loss_dict['rot_loss'].item()
             trans_loss_sum += loss_dict['trans_loss'].item()
+            proj_loss_sum += loss_dict['proj_loss'].item()
             trans_err_cm_sum += loss_dict['trans_err_cm'].item()
             proj_err_px_sum += loss_dict['proj_err_px'].item()
-            rot_err_deg_sum += loss_dict['rot_err_asymm_deg']
+            rot_err_deg_sum += loss_dict['rot_err_deg']
 
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
-        'add_loss_avg': add_loss_sum / len(loader),
-        'proj_loss_avg': proj_loss_sum / len(loader),
         'rot_loss_avg': rot_loss_sum / len(loader),
-        'trans_loss_avg': trans_loss_sum / len(loader),  # 🎯 TRANS LOSS
+        'trans_loss_avg': trans_loss_sum / len(loader),
+        'proj_loss_avg': proj_loss_sum / len(loader),
         'trans_err_cm_avg': trans_err_cm_sum / len(loader),
         'proj_err_px_avg': proj_err_px_sum / len(loader),
         'rot_err_deg_avg': rot_err_deg_sum / len(loader)
@@ -226,17 +221,22 @@ def train(
     weight_decay=1e-5,
     device='cuda',
     freeze_rgb_epochs=5,
-    add_weight=0.0,      # float o tuple (start, end)
-    proj_weight=2.0,     # float o tuple (start, end)
-    trans_weight=100.0,  # float o tuple (start, end)
-    rot_weight=50.0,     # float o tuple (start, end)
+    rot_weight=10.0,     # float o tuple (start, end) - Centered ADD/ADD-S
+    trans_weight=100.0,  # float o tuple (start, end) - Pure Translation L1
+    proj_weight=2.0,     # float o tuple (start, end) - 2D Projection (opzionale)
     switch_epoch=40,     # Epoca in cui switchare i pesi (per Curriculum Learning)
     partial_unfreeze=False,
     resume_from_checkpoint=None,
     reset_training=False 
 ):
     """
-    Training con supporto per Curriculum Learning.
+    Training con LOSS PURAMENTE GEOMETRICHE + Curriculum Learning.
+    
+    Eliminata completamente Geodesic/Quaternion Loss algebrica.
+    Usa solo:
+    - L_rot: Centered ADD/ADD-S (isola rotazione)
+    - L_trans: Pure Translation L1
+    - L_proj: 2D Projection (opzionale)
     
     I parametri *_weight possono essere:
     - float: peso costante per tutto il training
@@ -257,16 +257,14 @@ def train(
     ).to(device)
 
     # Inizializza loss con i valori iniziali (epoca 0)
-    init_add_weight = get_weight_value(add_weight, 0, switch_epoch)
-    init_proj_weight = get_weight_value(proj_weight, 0, switch_epoch)
-    init_trans_weight = get_weight_value(trans_weight, 0, switch_epoch)
     init_rot_weight = get_weight_value(rot_weight, 0, switch_epoch)
+    init_trans_weight = get_weight_value(trans_weight, 0, switch_epoch)
+    init_proj_weight = get_weight_value(proj_weight, 0, switch_epoch)
     
     criterion = ExtensionLoss(
-        add_weight=init_add_weight,
-        proj_weight=init_proj_weight,
-        trans_weight=init_trans_weight,
         rot_weight=init_rot_weight,
+        trans_weight=init_trans_weight,
+        proj_weight=init_proj_weight,
         cam_k=cam_k,
         model_points_dict=points_dict,
     ).to(device)
@@ -353,30 +351,26 @@ def train(
     for epoch in range(start_epoch, epochs):
         print(f"\nEpoch {epoch+1}/{epochs}")
         
-        # 🎯 CURRICULUM LEARNING: Aggiorna pesi dinamicamente
-        current_add = get_weight_value(add_weight, epoch, switch_epoch)
-        current_proj = get_weight_value(proj_weight, epoch, switch_epoch)
-        current_trans = get_weight_value(trans_weight, epoch, switch_epoch)
+        # 🎯 CURRICULUM LEARNING: Aggiorna pesi dinamicamente (solo loss geometriche)
         current_rot = get_weight_value(rot_weight, epoch, switch_epoch)
+        current_trans = get_weight_value(trans_weight, epoch, switch_epoch)
+        current_proj = get_weight_value(proj_weight, epoch, switch_epoch)
         
         # Notifica switch se siamo esattamente all'epoca di cambio
         if epoch == switch_epoch:
             print(f"\n🔄 CURRICULUM SWITCH @ Epoch {epoch+1}:")
-            if isinstance(add_weight, (tuple, list)):
-                print(f"   ADD:   {add_weight[0]:.2f} → {add_weight[1]:.2f}")
-            if isinstance(proj_weight, (tuple, list)):
-                print(f"   PROJ:  {proj_weight[0]:.2f} → {proj_weight[1]:.2f}")
-            if isinstance(trans_weight, (tuple, list)):
-                print(f"   TRANS: {trans_weight[0]:.2f} → {trans_weight[1]:.2f}")
             if isinstance(rot_weight, (tuple, list)):
                 print(f"   ROT:   {rot_weight[0]:.2f} → {rot_weight[1]:.2f}")
+            if isinstance(trans_weight, (tuple, list)):
+                print(f"   TRANS: {trans_weight[0]:.2f} → {trans_weight[1]:.2f}")
+            if isinstance(proj_weight, (tuple, list)):
+                print(f"   PROJ:  {proj_weight[0]:.2f} → {proj_weight[1]:.2f}")
             print()
         
-        # Aggiorna pesi nella criterion
-        criterion.w_add = current_add
-        criterion.w_proj = current_proj
-        criterion.w_trans = current_trans
+        # Aggiorna pesi nella criterion (solo loss geometriche)
         criterion.w_rot = current_rot
+        criterion.w_trans = current_trans
+        criterion.w_proj = current_proj
 
         # Stampa LR dinamicamente in base al numero di gruppi
         if len(optimizer.param_groups) > 0:
@@ -394,7 +388,7 @@ def train(
             
         train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device)
         print(
-            f"  Train Loss: {train_avg_metrics['total_loss_avg']:.4f}, ADD: {train_avg_metrics['add_loss_avg']:.4f}, "
+            f"  Train Loss: {train_avg_metrics['total_loss_avg']:.4f}, "
             f"Trans: {train_avg_metrics['trans_loss_avg']:.4f}, Rot: {train_avg_metrics['rot_loss_avg']:.4f}, Proj: {train_avg_metrics['proj_loss_avg']:.4f} "
             f"(Rot Err: {train_avg_metrics['rot_err_deg_avg']:.4f}°, Trans Err: {train_avg_metrics['trans_err_cm_avg']:.4f} cm)"
         )
@@ -402,7 +396,7 @@ def train(
         val_avg_metrics = validate(model, val_loader, criterion, device)
         
         print(
-            f"  Val Loss: {val_avg_metrics['total_loss_avg']:.4f}, ADD: {val_avg_metrics['add_loss_avg']:.4f}, "
+            f"  Val Loss: {val_avg_metrics['total_loss_avg']:.4f}, "
             f"Trans: {val_avg_metrics['trans_loss_avg']:.4f}, Rot: {val_avg_metrics['rot_loss_avg']:.4f}, Proj: {val_avg_metrics['proj_loss_avg']:.4f} "
             f"(Rot Err: {val_avg_metrics['rot_err_deg_avg']:.4f}°, Trans Err: {val_avg_metrics['trans_err_cm_avg']:.4f} cm)"
         )

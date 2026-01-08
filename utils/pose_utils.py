@@ -508,6 +508,64 @@ def batch_adds_loss(pred_R, pred_t, gt_R, gt_t, points):
     
     return torch.mean(min_dists, dim=1) # (B,)
 
+def batch_centered_add_loss(pred_R, gt_R, points):
+    """
+    Calcola Centered ADD loss (SOLO ROTAZIONE, no traslazione).
+    Isola l'errore di rotazione applicando R sui punti centrati nell'origine.
+    
+    Args:
+        pred_R, gt_R: (B, 3, 3) - Matrici di rotazione
+        points: (B, N, 3) - Punti del modello (già centrati o verranno centrati)
+    
+    Returns:
+        (B,) - Loss per ogni elemento del batch
+    """
+    # Centra i punti nell'origine (rimuovi centroide)
+    points_centered = points - points.mean(dim=1, keepdim=True)  # (B, N, 3)
+    
+    # Trasponi per bmm: (B, 3, N)
+    points_t = points_centered.transpose(1, 2)
+    
+    # Applica SOLO rotazione (traslazione = 0)
+    pred_pts = torch.bmm(pred_R, points_t)  # (B, 3, N)
+    gt_pts = torch.bmm(gt_R, points_t)      # (B, 3, N)
+    
+    # Distanza euclidea punto-a-punto
+    dist = torch.norm(pred_pts - gt_pts, dim=1)  # (B, N)
+    return torch.mean(dist, dim=1)  # (B,)
+
+def batch_centered_adds_loss(pred_R, gt_R, points):
+    """
+    Calcola Centered ADD-S loss (SOLO ROTAZIONE per oggetti simmetrici).
+    Usa Nearest Neighbor per gestire ambiguità di simmetria.
+    
+    Args:
+        pred_R, gt_R: (B, 3, 3) - Matrici di rotazione
+        points: (B, N, 3) - Punti del modello
+    
+    Returns:
+        (B,) - Loss per ogni elemento del batch
+    """
+    # Centra i punti nell'origine
+    points_centered = points - points.mean(dim=1, keepdim=True)  # (B, N, 3)
+    points_t = points_centered.transpose(1, 2)  # (B, 3, N)
+    
+    # Applica SOLO rotazione
+    pred_pts = torch.bmm(pred_R, points_t)  # (B, 3, N)
+    gt_pts = torch.bmm(gt_R, points_t)      # (B, 3, N)
+    
+    # Permute per cdist: (B, N, 3)
+    pred_pts = pred_pts.permute(0, 2, 1)
+    gt_pts = gt_pts.permute(0, 2, 1)
+    
+    # Matrice distanze pairwise (B, N, N)
+    dist_matrix = torch.cdist(pred_pts, gt_pts, p=2)
+    
+    # Nearest Neighbor: minimo per ogni punto predetto
+    min_dists, _ = torch.min(dist_matrix, dim=2)  # (B, N)
+    
+    return torch.mean(min_dists, dim=1)  # (B,)
+
 def load_all_models_points(dataset_root, num_points=1000):
     """
     Carica i modelli 3D dal disco, li campiona e li restituisce in un dizionario.
@@ -545,10 +603,42 @@ def load_all_models_points(dataset_root, num_points=1000):
     print(f"✅ Loaded {len(cache)} models.")
     return cache
 
+def compute_batch_rotation_error_all(pred_quat, gt_quat):
+    """
+    Calcola l'errore medio di rotazione in gradi per TUTTO il batch.
+    NON filtra oggetti simmetrici - utile per logging e monitoraggio.
+    
+    Usa la formula: angular_distance = 2 * arccos(|q1 · q2|)
+    L'abs gestisce la double cover dei quaternioni (q = -q).
+    
+    Args:
+        pred_quat: (B, 4) quaternioni predetti
+        gt_quat: (B, 4) quaternioni ground truth
+    
+    Returns:
+        Tensor scalare: errore angolare medio in gradi
+    """
+    with torch.no_grad():
+        # Normalizza quaternioni
+        pred_q = F.normalize(pred_quat, p=2, dim=1, eps=1e-8)
+        gt_q = F.normalize(gt_quat, p=2, dim=1, eps=1e-8)
+        
+        # Dot product assoluto per gestire q = -q
+        dot_prod = torch.abs(torch.sum(pred_q * gt_q, dim=1))
+        dot_prod = torch.clamp(dot_prod, -1.0, 1.0)
+        
+        # Distanza angolare in radianti
+        angular_dist_rad = 2 * torch.acos(dot_prod)
+        
+        # Converti in gradi e restituisci media
+        return torch.rad2deg(angular_dist_rad).mean()
+
 def compute_batch_rotation_error_asymm(pred_quat, gt_quat, class_ids, symmetry_lookup):
     """
-    Calcola l'errore medio di rotazione in gradi per un batch di quaternioni.
-    Gestisce l'ambiguità q = -q e la stabilità numerica.
+    Calcola l'errore medio di rotazione in gradi solo per oggetti ASIMMETRICI.
+    Filtra gli oggetti simmetrici usando symmetry_lookup.
+    
+    DEPRECATO: Usa compute_batch_rotation_error_all per logging completo.
     """
     
     is_sym = symmetry_lookup[class_ids.long()]
