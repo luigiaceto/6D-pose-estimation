@@ -1,7 +1,6 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-import yaml
 import pandas as pd
 import trimesh
 
@@ -34,6 +33,7 @@ LINEMOD_OBJECT_NAMES = {
     "MEAN": "MEAN"
 }
 
+
 def yolo_to_xyxy(yolo_box, img_width, img_height):
     """Convert YOLO format (x_center, y_center, width, height) to (x1, y1, x2, y2)."""
     x_center, y_center, width, height = yolo_box
@@ -42,6 +42,7 @@ def yolo_to_xyxy(yolo_box, img_width, img_height):
     x2 = (x_center + width/2) * img_width
     y2 = (y_center + height/2) * img_height
     return [x1, y1, x2, y2]
+
 
 def quaternion_to_rotation_matrix(quaternion):
     """
@@ -69,6 +70,7 @@ def quaternion_to_rotation_matrix(quaternion):
     
     return R
 
+
 def compute_quaternion_loss(q1, q2):
         """
         Geodesic Distance tra quaternions (gestisce ambiguità q = -q).
@@ -85,6 +87,7 @@ def compute_quaternion_loss(q1, q2):
         dot = torch.clamp(dot, 0.0, 1.0)
         return torch.mean(1.0 - dot)
     
+
 def compute_matrix_geodesic_loss(pred_quat, gt_quat):
     """
     Geodesic Distance su SO(3) manifold usando rotation matrices.
@@ -189,31 +192,6 @@ def compute_add_s_rotation_only(pred_R, gt_R, model_points):
     return np.mean(min_distances)
 
 
-def load_model_points(dataset_root, obj_id):
-    """Carica corner points 3D del modello."""
-    models_info_path = str(dataset_root / "models" / "models_info.yml")
-    with open(models_info_path, 'r') as f:
-        models_info = yaml.load(f, Loader=yaml.CLoader)
-    
-    info = models_info[obj_id]
-    min_x, min_y, min_z = info['min_x'], info['min_y'], info['min_z']
-    size_x, size_y, size_z = info['size_x'], info['size_y'], info['size_z']
-    
-    # 8 corners del bounding box
-    corners = np.array([
-        [min_x, min_y, min_z],
-        [min_x + size_x, min_y, min_z],
-        [min_x, min_y + size_y, min_z],
-        [min_x + size_x, min_y + size_y, min_z],
-        [min_x, min_y, min_z + size_z],
-        [min_x + size_x, min_y, min_z + size_z],
-        [min_x, min_y + size_y, min_z + size_z],
-        [min_x + size_x, min_y + size_y, min_z + size_z]
-    ], dtype=np.float32) / 1000.0  # mm -> m
-    
-    return corners
-
-
 def compute_rotation_error(pred_R, gt_R):
     """Errore di rotazione in gradi."""
     R_diff = pred_R.T @ gt_R
@@ -268,6 +246,7 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
         print(f"Saved CSV to {table_path}")
     return df
 
+
 # USATE DALLA ADD-Loss
 def batch_add_loss(pred_R, pred_t, gt_R, gt_t, points):
     """
@@ -291,6 +270,7 @@ def batch_add_loss(pred_R, pred_t, gt_R, gt_t, points):
     dist = torch.norm(pred_pts - gt_pts, dim=1) # (B, N)
     return torch.mean(dist, dim=1) # (B,) Loss per ogni elemento del batch
 
+
 def batch_adds_loss(pred_R, pred_t, gt_R, gt_t, points):
     """
     Calcola ADD-S loss (Symmetric) usando Nearest Neighbor.
@@ -311,6 +291,7 @@ def batch_adds_loss(pred_R, pred_t, gt_R, gt_t, points):
     min_dists, _ = torch.min(dist_matrix, dim=2) # (B, N)
     
     return torch.mean(min_dists, dim=1) # (B,)
+
 
 def load_all_models_points(dataset_root, num_points=1000):
     """
@@ -348,6 +329,7 @@ def load_all_models_points(dataset_root, num_points=1000):
             
     print(f"✅ Loaded {len(cache)} models.")
     return cache
+
 
 def compute_batch_rotation_error_asymm(pred_quat, gt_quat, class_ids, symmetry_lookup):
     """

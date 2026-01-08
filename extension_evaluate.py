@@ -35,8 +35,9 @@ def evaluate_extension_batch(
     
     object_diameters = test_dataset.get_object_diameters() 
     
-    print("Preloading mesh points for batch evaluation...")
+    print("⏳ Preloading mesh points for batch evaluation...")
     mesh_points_cache = load_all_models_points(dataset_root, num_points=1000)
+    print(f"✅ Loaded {len(mesh_points_cache)} objects with 1000 surface points each")
     
     # Spostiamo tutti i punti sulla GPU subito per velocità
     for k, v in mesh_points_cache.items():
@@ -50,10 +51,8 @@ def evaluate_extension_batch(
     per_class_metrics = defaultdict(list)
     
     print("Evaluating RGB-D Extension (BATCH MODE)...")
-    
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="Test Batch"):
-            
             # Dati su GPU
             rgb = batch['cropped_img'].to(device)
             depth = batch['cropped_depth'].to(device)
@@ -107,11 +106,9 @@ def evaluate_extension_batch(
                     final_add = add_res[i]
                 
                 # Calcolo errori classici (rot/trans)
-                # Nota: compute_rotation_error è leggero, si può lasciare in numpy
                 rot_err = compute_rotation_error(pred_R_np[i], gt_R_np[i])
                 trans_err = compute_translation_error(pred_t_np[i], gt_t_np[i])
                 
-                # Salvataggio
                 all_add.append(final_add)
                 all_rot_errors.append(rot_err)
                 all_trans_errors.append(trans_err)

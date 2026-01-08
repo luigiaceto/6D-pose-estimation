@@ -26,7 +26,7 @@ def visualize_baseline_predictions(
     sample_idx=None,
     image_path=None,
     yolo_checkpoint=str(Path("checkpoints") / "best_yolo_model.pt"),
-    pose_checkpoint=str(Path("checkpoints") / "best_pose_model.pt"),
+    model_checkpoint=str(Path("checkpoints") / "best_pose_model.pt"),
     device='cuda',
     figsize=(12, 8),
     img_mean=[0.485, 0.456, 0.406],
@@ -74,7 +74,7 @@ def visualize_baseline_predictions(
     # 3. Load models
     yolo_model = YOLO(yolo_checkpoint)
     
-    checkpoint = torch.load(pose_checkpoint, map_location=device, weights_only=False)
+    checkpoint = torch.load(model_checkpoint, map_location=device, weights_only=False)
     pose_model = ResNetPose().to(device)
     pose_model.load_state_dict(checkpoint['model_state_dict'])
     pose_model.eval()
