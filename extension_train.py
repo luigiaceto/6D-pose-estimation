@@ -392,7 +392,7 @@ def train(
             optimizer.param_groups[0]['lr'] = lr_rgb_backbone
             print(f">>> 🔓 RGB Backbone Unfrozen (LR reset to {lr_rgb_backbone:.2e})")
             
-        train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device, current_epoch=epoch)
+        train_avg_metrics = train_one_epoch(model, train_loader, criterion, optimizer, scaler, device)
         print(
             f"  Train Loss: {train_avg_metrics['total_loss_avg']:.4f}, ADD: {train_avg_metrics['add_loss_avg']:.4f}, "
             f"Trans: {train_avg_metrics['trans_loss_avg']:.4f}, Rot: {train_avg_metrics['rot_loss_avg']:.4f}, Proj: {train_avg_metrics['proj_loss_avg']:.4f} "
