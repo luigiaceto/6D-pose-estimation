@@ -76,7 +76,7 @@ class TridentNetPose(nn.Module):
             nn.Dropout(0.5)
         )
         
-        # ========== 3 teste finali ========== idee nomi modello: ChimeraPose, TridentNet, HydraPose, Hecate6D, DeltaPose, Fusio3, CerberusNet
+        # ========== 3 teste finali ==========
         # --- Head Rotazione ---
         self.rot_head = nn.Linear(1024, 4) # Output: 4 quaternioni
         
@@ -142,9 +142,9 @@ class TridentNetPose(nn.Module):
         # ** Depth Z (Log-Space Prediction) **
         # La rete predice s = log(Z), poi calcoliamo Z = exp(s)
         # Vantaggi:
-        # 1. Z > 0 sempre garantito (no offset arbitrari)
-        # 2. Errore relativo invece che assoluto (10% a 0.5m = 10% a 5m)
-        # 3. Standard nella letteratura di depth estimation
+        # - Z > 0 sempre garantito (no offset arbitrari)
+        # - Errore relativo invece che assoluto (10% a 0.5m = 10% a 5m)
+        # - Standard nella letteratura di depth estimation
         log_z = self.z_head(fused)  # (B, 1) - predice log(Z)
         z_pred = torch.exp(log_z[:, 0:1])  # (B, 1) - Z in metri
         
