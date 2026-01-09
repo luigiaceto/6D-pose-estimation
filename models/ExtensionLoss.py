@@ -2,10 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from utils.pose_utils import (
-    compute_add_rotation_only,
-    compute_add_s_rotation_only,
+    compute_add_rot_loss,
+    compute_adds_rot_loss,
     quaternion_to_rotation_matrix,
-    compute_batch_rotation_error_all,
+    compute_batch_rotation_error,
     SYMMETRIC_OBJECTS
 )
 
@@ -110,14 +110,14 @@ class ExtensionLoss(nn.Module):
         for i, cid in enumerate(class_ids):
             if self.symmetry_lookup[cid.long()]:
                 # Symmetric: use Nearest Neighbor matching
-                l = compute_add_s_rotation_only(
+                l = compute_adds_rot_loss(
                     pred_R[i:i+1], 
                     gt_R[i:i+1], 
                     batch_points[i:i+1]
                 )
             else:
                 # Asymmetric: point-to-point matching
-                l = compute_add_rotation_only(
+                l = compute_add_rot_loss(
                     pred_R[i:i+1], 
                     gt_R[i:i+1], 
                     batch_points[i:i+1]
@@ -147,8 +147,11 @@ class ExtensionLoss(nn.Module):
             trans_err_cm = torch.norm(pred_trans - gt_trans, p=2, dim=1).mean() * 100
             proj_err_px = torch.norm(pred_2d - gt_2d_target, p=2, dim=1).mean()
             # 🎯 DISACCOPPIAMENTO TOTALE: Calcola errore su TUTTO il batch
-            # Nessun filtro per simmetrici - così i log mostrano sempre valori reali
-            rot_err_deg = compute_batch_rotation_error_all(pred_quat, gt_quat)
+            # Gestisce correttamente simmetrici (ADD-S) e asimmetrici (geodesic)
+            rot_err_deg = compute_batch_rotation_error(
+                pred_quat, gt_quat, class_ids, 
+                self.symmetry_lookup, self.model_points_bank
+            )
 
         return {
             'total_loss': total_loss,

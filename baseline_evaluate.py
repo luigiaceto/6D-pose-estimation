@@ -18,13 +18,13 @@ from models.ResNetPose import ResNetPose
 from models.PinholeCamera import PinholeCamera
 from utils.pose_utils import (
     quaternion_to_rotation_matrix,  
-    compute_add_metric, 
+    batch_compute_add_metric, 
     compute_add_rotation_only, 
-    compute_add_s_metric, 
+    batch_compute_add_s_metric, 
     compute_add_s_rotation_only, 
     compute_rotation_error,
     compute_translation_error,
-    load_all_models_points,
+    load_models_points,
     print_evaluation_results_table,
     SYMMETRIC_OBJECTS, 
     )
@@ -58,7 +58,7 @@ def evaluate_baseline(
     
     # --- FIX CRITICO: CARICA I 1000 PUNTI QUI ---
     print(">>> 📦 Preloading HIGH RES models (1000 points per object)...")
-    model_points_dict = load_all_models_points(dataset_root, num_points=1000)
+    model_points_dict = load_models_points(dataset_root, num_points=1000)
     print(f"    Loaded {len(model_points_dict)} objects with 1000 surface points each")
     
     # Metriche
@@ -110,21 +110,34 @@ def evaluate_baseline(
             pred_quaternion = model(cropped_img)  # (B, 4)
             pred_rotation = quaternion_to_rotation_matrix(pred_quaternion)
             
-            # Converti a numpy
+            # 🚀 BATCH OPTIMIZATION: Prepara tutti i punti per tutto il batch
+            batch_points = torch.stack([model_points_dict[int(oid)] for oid in obj_ids])
+            
+            # Reshape per batch functions: (B, 3) -> (B, 3, 1)
+            pred_t_batch = pred_translation.unsqueeze(-1)
+            gt_t_batch = gt_translation.unsqueeze(-1)
+            
+            # 🚀 Calcola ADD per TUTTO il batch (asimmetrico)
+            add_batch = batch_compute_add_metric(pred_rotation, pred_t_batch, gt_rotation, gt_t_batch, batch_points)
+            
+            # 🚀 Calcola ADD-S per TUTTO il batch (simmetrico)
+            adds_batch = batch_compute_add_s_metric(pred_rotation, pred_t_batch, gt_rotation, gt_t_batch, batch_points)
+            
+            # Converti su CPU per elaborazione finale
+            add_batch_np = (add_batch * 100).cpu().numpy()  # m -> cm
+            adds_batch_np = (adds_batch * 100).cpu().numpy()  # m -> cm
             pred_R = pred_rotation.cpu().numpy()
             pred_t = pred_translation.cpu().numpy()
             gt_R = gt_rotation.cpu().numpy()
             gt_t = gt_translation.cpu().numpy()
+            batch_points_np = batch_points.cpu().numpy()
             
-            # Per ogni sample nel batch
+            # Per ogni sample nel batch (solo per logging e metriche accessorie)
             for i in range(len(obj_ids)):
                 obj_id = int(obj_ids[i])
+                model_points = batch_points_np[i]  # (N, 3)
                 
-                # --- FIX CRITICO: USA IL DIZIONARIO CON 1000 PUNTI ---
-                # NON usare load_model_points che restituisce solo gli 8 punti del bbox!
-                model_points = model_points_dict[obj_id].cpu().numpy()  # Converti tensor -> numpy
-                
-                # Rotation e translation errors
+                # Rotation e translation errors (rimangono singoli perché non facilmente batchabili)
                 rot_err = compute_rotation_error(pred_R[i], gt_R[i])
                 trans_err = compute_translation_error(pred_t[i], gt_t[i])
                
@@ -133,15 +146,12 @@ def evaluate_baseline(
                 all_object_ids.append(obj_id)
                 all_diameters.append(object_diameters[obj_id])
                 
-                
-                # ADD o ADD-S
-                
+                # 🚀 Seleziona ADD corretto (già calcolato in batch!)
                 if obj_id in symmetric_objects:
-                    add_s = compute_add_s_metric(
-                        pred_R[i], pred_t[i], gt_R[i], gt_t[i], model_points
-                    )
-                    all_add_s.append(add_s * 100)  # m -> cm
-                    all_add.append(add_s * 100)  # Per calcolo complessivo
+                    final_add = adds_batch_np[i]
+                    all_add_s.append(final_add)
+                    all_add.append(final_add)
+                    # ADD-S rotation only (rimane singolo per ora)
                     add_s_rotation_only = compute_add_s_rotation_only(
                         pred_R[i], gt_R[i], model_points
                     )
@@ -150,15 +160,14 @@ def evaluate_baseline(
                         {
                             'rotation': rot_err,
                             'translation': trans_err,
-                            'add': add_s * 100,
+                            'add': final_add,
                             'add_rotation_only': add_s_rotation_only * 100 
                         }
                     )
                 else:
-                    add = compute_add_metric(
-                        pred_R[i], pred_t[i], gt_R[i], gt_t[i], model_points
-                    )
-                    all_add.append(add * 100)  # m -> cm
+                    final_add = add_batch_np[i]
+                    all_add.append(final_add)
+                    # ADD rotation only (rimane singolo per ora)
                     add_rotation_only = compute_add_rotation_only(
                         pred_R[i], gt_R[i], model_points
                     )
@@ -167,7 +176,7 @@ def evaluate_baseline(
                         { 
                             'rotation': rot_err,
                             'translation': trans_err,
-                            'add': add * 100,
+                            'add': final_add,
                             'add_rotation_only': add_rotation_only * 100
                         }
                     )

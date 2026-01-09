@@ -202,12 +202,12 @@ def visualize_fusion_predictions(
                 pred_quat, pred_delta_z, pred_uv = pose_model(tensor_rgb, tensor_depth, tensor_center, tensor_bbox_dims)
                 
                 # Ricostruisci translation con residual learning
-                from utils.pose_utils import solve_translation_geometric_high_precision
+                from utils.pose_utils import compute_translation_from_depth_crop
                 
                 cam_k_tensor = torch.tensor([cam_k[0], cam_k[4], cam_k[2], cam_k[5]], device=device).unsqueeze(0)
                 
                 # Calcola Z geometrico robusto
-                trans_geometric = solve_translation_geometric_high_precision(
+                trans_geometric = compute_translation_from_depth_crop(
                     cropped_depth=tensor_depth,
                     pred_uv=pred_uv,
                     cam_k=cam_k_tensor,

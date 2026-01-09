@@ -11,11 +11,11 @@ from models.PinholeCamera import PinholeCamera
 from utils.pose_utils import (
     compute_rotation_error, 
     compute_translation_error,
-    compute_add_metric, 
-    compute_add_s_metric, 
+    batch_compute_add_metric, 
+    batch_compute_add_s_metric, 
     compute_add_rotation_only,
     compute_add_s_rotation_only,
-    load_model_points, 
+    load_models_points, 
     quaternion_to_rotation_matrix,
     print_evaluation_results_table,
     SYMMETRIC_OBJECTS,
@@ -141,16 +141,23 @@ def evaluate_full_pipeline(
         pred_t = pinhole.unproject_2d_to_3d(center_2d, depth)[0].cpu().numpy()
 
         # STEP 5: METRICS
-        model_points = load_model_points(test_dataset.dataset_root, gt_obj_id)
+        model_points = load_models_points(test_dataset.dataset_root, gt_obj_id)
         
         r_err = compute_rotation_error(pred_R, gt_R)
         t_err = compute_translation_error(pred_t, gt_t)
         
+        # 🚀 Converti a torch e aggiungi batch dimension per funzioni batch
+        pred_R_torch = torch.from_numpy(pred_R).unsqueeze(0).to(device)  # (1, 3, 3)
+        gt_R_torch = torch.from_numpy(gt_R).unsqueeze(0).to(device)      # (1, 3, 3)
+        pred_t_torch = torch.from_numpy(pred_t).unsqueeze(0).unsqueeze(-1).to(device)  # (1, 3, 1)
+        gt_t_torch = torch.from_numpy(gt_t).unsqueeze(0).unsqueeze(-1).to(device)      # (1, 3, 1)
+        model_points_torch = torch.from_numpy(model_points).unsqueeze(0).to(device)    # (1, N, 3)
+        
         if gt_obj_id in symmetric_objects:
-            add_val = compute_add_s_metric(pred_R, pred_t, gt_R, gt_t, model_points) * 100
+            add_val = batch_compute_add_s_metric(pred_R_torch, pred_t_torch, gt_R_torch, gt_t_torch, model_points_torch).item() * 100
             add_rot_only = compute_add_s_rotation_only(pred_R, gt_R, model_points) * 100
         else:
-            add_val = compute_add_metric(pred_R, pred_t, gt_R, gt_t, model_points) * 100
+            add_val = batch_compute_add_metric(pred_R_torch, pred_t_torch, gt_R_torch, gt_t_torch, model_points_torch).item() * 100
             add_rot_only = compute_add_rotation_only(pred_R, gt_R, model_points) * 100
             
         per_class_metrics[gt_obj_id].append({

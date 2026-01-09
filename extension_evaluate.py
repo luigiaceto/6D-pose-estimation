@@ -7,16 +7,14 @@ from collections import defaultdict
 from models.TridentNetPose import TridentNetPose
 from utils.pose_utils import (
     quaternion_to_rotation_matrix,  
-    load_all_models_points, 
+    load_models_points, 
     print_evaluation_results_table,
-    batch_add_loss,
-    batch_adds_loss,
     compute_rotation_error,
     compute_rotation_error_symmetric,
+    batch_compute_add_metric,
+    batch_compute_add_s_metric,
     compute_translation_error,
-    solve_translation_geometric,
-    solve_translation_geometric_high_precision,
-    solve_translation_direct_from_file,
+    compute_translation_from_depth_crop,
     SYMMETRIC_OBJECTS
 )
 
@@ -40,7 +38,7 @@ def evaluate_extension_batch(
     object_diameters = test_dataset.get_object_diameters() 
     
     print("Preloading mesh points for batch evaluation...")
-    mesh_points_cache = load_all_models_points(dataset_root, num_points=1000)
+    mesh_points_cache = load_models_points(dataset_root, num_points=1000)
     
     # Spostiamo tutti i punti sulla GPU subito per velocità
     for k, v in mesh_points_cache.items():
@@ -82,7 +80,7 @@ def evaluate_extension_batch(
             cam_k_batch = cam_k_tensor.repeat(len(pred_quat), 1)
             
             # 1. Calcola Z_geometric robusto (mediana 21x21)
-            trans_geometric = solve_translation_geometric_high_precision(
+            trans_geometric = compute_translation_from_depth_crop(
                 cropped_depth=depth,        # Tensore (B, 1, H, W) dal dataloader
                 pred_uv=pred_uv,            # Centro (u,v) predetto dalla rete
                 cam_k=cam_k_batch,
@@ -127,10 +125,10 @@ def evaluate_extension_batch(
             gt_t_b = gt_trans.unsqueeze(-1)
             
             # Calcola ADD (Asimmetrico) per TUTTI
-            add_losses = batch_add_loss(pred_rot_matrix, pred_t_b, gt_rot_matrix, gt_t_b, batch_points)
+            add_losses = batch_compute_add_metric(pred_rot_matrix, pred_t_b, gt_rot_matrix, gt_t_b, batch_points)
             
             # Calcola ADD-S (Simmetrico) per TUTTI
-            adds_losses = batch_adds_loss(pred_rot_matrix, pred_t_b, gt_rot_matrix, gt_t_b, batch_points)
+            adds_losses = batch_compute_add_s_metric(pred_rot_matrix, pred_t_b, gt_rot_matrix, gt_t_b, batch_points)
             
             # Portiamo tutto su CPU per logging e calcoli finali leggeri
             # Convertiamo in cm (* 100) subito

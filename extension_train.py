@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 from models.TridentNetPose import TridentNetPose
 from models.ExtensionLoss import ExtensionLoss
-from utils.pose_utils import load_all_models_points, solve_translation_geometric_high_precision
+from utils.pose_utils import load_models_points, compute_translation_from_depth_crop
 
 
 def train_one_epoch(
@@ -66,7 +66,7 @@ def train_one_epoch(
             
             # solve_translation_geometric_high_precision restituisce (B, 3) -> [tx, ty, tz]
             # Prendiamo solo la Z (indice 2)
-            trans_geometric = solve_translation_geometric_high_precision(
+            trans_geometric = compute_translation_from_depth_crop(
                 cropped_depth=cropped_depth,      # Depth RAW (non scalata)
                 pred_uv=pred_2d,                   # Coordinate 2D predette
                 cam_k=cam_k_batch,
@@ -161,7 +161,7 @@ def validate(
                 # 2. 🎯 CALCOLA Z GEOMETRICA per validation
                 cam_k_batch = criterion.cam_k.repeat(len(pred_quat), 1)
                 
-                trans_geometric = solve_translation_geometric_high_precision(
+                trans_geometric = compute_translation_from_depth_crop(
                     cropped_depth=cropped_depth,   # Depth RAW
                     pred_uv=pred_uv, 
                     cam_k=cam_k_batch, 
@@ -250,7 +250,7 @@ def train(
         else:
             return weight
     
-    points_dict = load_all_models_points(dataset_root, num_points=1000)
+    points_dict = load_models_points(dataset_root, num_points=1000)
 
     model = TridentNetPose(
         cam_k=cam_k

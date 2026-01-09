@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from utils.pose_utils import compute_matrix_geodesic_loss, compute_quaternion_loss,  SYMMETRIC_OBJECTS
+from utils.pose_utils import compute_geodesic_loss, compute_quaternion_loss,  SYMMETRIC_OBJECTS
 
 
 class BaselineLoss(nn.Module):
@@ -47,7 +47,7 @@ class BaselineLoss(nn.Module):
                 
                 # Oggetto simmetrico -> Rotation Matrix Geodesic
                 if class_id in SYMMETRIC_OBJECTS:
-                    loss = compute_matrix_geodesic_loss(
+                    loss = compute_geodesic_loss(
                         pred_quat[i:i+1], gt_quat[i:i+1]
                     )
                 # Oggetto standard -> Quaternion Geodesic
