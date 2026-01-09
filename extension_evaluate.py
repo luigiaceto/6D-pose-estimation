@@ -38,7 +38,7 @@ def evaluate_extension_batch(
     object_diameters = test_dataset.get_object_diameters() 
     
     print("Preloading mesh points for batch evaluation...")
-    mesh_points_cache = load_models_points(dataset_root, num_points=1000)
+    mesh_points_cache = load_models_points(dataset_root, num_points=2000)
     
     # Spostiamo tutti i punti sulla GPU subito per velocità
     for k, v in mesh_points_cache.items():

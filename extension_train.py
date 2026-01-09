@@ -250,7 +250,7 @@ def train(
         else:
             return weight
     
-    points_dict = load_models_points(dataset_root, num_points=1000)
+    points_dict = load_models_points(dataset_root, num_points=2000)
 
     model = TridentNetPose(
         cam_k=cam_k
