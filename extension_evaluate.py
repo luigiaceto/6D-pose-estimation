@@ -10,7 +10,6 @@ from utils.pose_utils import (
     load_models_points, 
     print_evaluation_results_table,
     compute_rotation_error,
-    compute_rotation_error_symmetric,
     batch_compute_add_metric,
     batch_compute_add_s_metric,
     compute_translation_error,
@@ -64,36 +63,28 @@ def evaluate_extension_batch(
             gt_trans = batch['translation'].to(device)     # (B, 3)
             gt_rot_matrix = batch['rotation'].to(device)   # (B, 3, 3)
             obj_ids = batch['obj_id'].to(device)           # (B,)
-            
-            # 🎯 SCALING DEPTH per la rete
-            net_input_depth = depth.clone()
-            if net_input_depth.mean() > 10.0:
-                net_input_depth = net_input_depth / 1000.0
 
-            # Forward - MODELLO ORA RESTITUISCE (quaternion, delta_z, uv)
+            # SCALING DEPTH: CNN vuole valori piccoli (mm -> m se necessario)
+            net_input_depth = depth / 1000.0
+
+            # Forward - Modello restituisce (quaternion, delta_z, uv)
             pred_quat, pred_delta_z, pred_uv = model(rgb, net_input_depth, bbox_center, bbox_dims)
             
-            # 🎯 RESIDUAL LEARNING: Z_final = Z_geometric + Delta_Z
+            # Z_final = Z_geometric + Delta_Z
             cam_k_tensor = torch.tensor([cam_k[0], cam_k[4], cam_k[2], cam_k[5]], device=device).unsqueeze(0)
             cam_k_batch = cam_k_tensor.repeat(len(pred_quat), 1)
             
-            # 1. Calcola Z_geometric robusto (mediana 21x21)
+            # 1. Calcola z geometricamente
             trans_geometric = compute_translation_from_depth_crop(
                 cropped_depth=depth,        # Tensore (B, 1, H, W) dal dataloader
                 pred_uv=pred_uv,            # Centro (u,v) predetto dalla rete
                 cam_k=cam_k_batch,
                 bbox_center=bbox_center,
                 bbox_dims=bbox_dims,
-                z_net=None,  # Durante evaluation, non usiamo fallback
-                use_bbox_center_only=False     # USA l'offset predetto (importante!)
             )
             
             # 2. Estrai Z e aggiungi correzione rete
-            if trans_geometric.dim() == 2:  # (B, 3)
-                z_geometric = trans_geometric[:, 2:3]  # (B, 1)
-            else:  # (B, 3, 1)
-                z_geometric = trans_geometric[:, 2, :]  # (B, 1)
-            
+            z_geometric = trans_geometric[:, 2:3]  # (B, 1)
             
             z_final = z_geometric + pred_delta_z  # (B, 1)
             
@@ -122,9 +113,8 @@ def evaluate_extension_batch(
             adds_losses = batch_compute_add_s_metric(pred_rot_matrix, pred_t_b, gt_rot_matrix, gt_t_b, batch_points)
             
             # Portiamo tutto su CPU per logging e calcoli finali leggeri
-            # Convertiamo in cm (* 100) subito
-            add_res = (add_losses * 100).cpu().numpy()
-            adds_res = (adds_losses * 100).cpu().numpy()
+            add_res = (add_losses).cpu().numpy()
+            adds_res = (adds_losses).cpu().numpy()
             
             # Calcolo errori classici (rot in deg, trans in cm)
             batch_size = len(obj_ids)
@@ -146,7 +136,8 @@ def evaluate_extension_batch(
                 
                 # Calcolo errori classici (rot/trans)
                 # Nota: compute_rotation_error è leggero, si può lasciare in numpy
-                rot_err = compute_rotation_error(pred_R_np[i], gt_R_np[i])
+                batch_points_np = batch_points.cpu().numpy()  # Converti batch in numpy
+                rot_err = compute_rotation_error(pred_R_np[i], gt_R_np[i], oid, batch_points_np[i])
                 trans_err = compute_translation_error(pred_t_np[i], gt_t_np[i])
                 
                 all_add.append(final_add)
@@ -162,18 +153,18 @@ def evaluate_extension_batch(
 
     # --- TABELLA FINALE ---
     all_add_np = np.array(all_add)
-    all_diameters_cm = np.array(all_diameters) / 10.0 # diametri convertiti da mm a cm
+    all_diameters_m = np.array(all_diameters) / 1000.0 # diametri convertiti da mm a cm
 
     # ADD Accuracy @ 10% diametro oggetti
-    thresholds = all_diameters_cm * 0.1
+    thresholds = all_diameters_m * 0.1
     accuracy = np.mean(all_add_np < thresholds) * 100
 
     per_class_results = []
     for cls_id, metrics in sorted(per_class_metrics.items()):
         metrics_df = pd.DataFrame(metrics)
-        cls_diam_cm = object_diameters[cls_id] / 10.0
-        cls_thresh = cls_diam_cm * 0.1
-        cls_acc = np.mean(metrics_df['add'] < cls_thresh) * 100
+        cls_diam_m = object_diameters[cls_id] / 1000.0  
+        cls_thresh_m = cls_diam_m * 0.1  
+        cls_acc = np.mean(metrics_df['add'] < cls_thresh_m) * 100 
         
         per_class_results.append({
             'class_id': cls_id,

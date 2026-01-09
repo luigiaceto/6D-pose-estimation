@@ -69,7 +69,7 @@ class ExtensionLoss(nn.Module):
                 'proj_loss': 2D projection (detached),
                 'trans_err_cm': translation error in cm,
                 'proj_err_px': projection error in pixels,
-                'rot_err_asymm_deg': rotation error in degrees
+                'rot_err_deg': rotation error in degrees
             }
         """
         device = pred_quat.device
@@ -96,37 +96,26 @@ class ExtensionLoss(nn.Module):
         gt_2d_target = torch.cat([gt_u, gt_v], dim=1)  # (B, 2)
 
         # ============================================
-        # LOSS COMPUTATION: PURE GEOMETRY
+        # LOSS COMPUTATION: PURE GEOMETRY (VECTORIZED)
         # ============================================
         
-        # --- L_rot: Centered ADD/ADD-S (rotation-only geometric loss) ---
+        # --- L_rot: Centered ADD/ADD-S (rotation-only, no loop) ---
         batch_points = self.model_points_bank[class_ids.long()]  # (B, N, 3)
         pred_R = quaternion_to_rotation_matrix(pred_quat)  # (B, 3, 3)
         gt_R = quaternion_to_rotation_matrix(gt_quat)      # (B, 3, 3)
         
-        # Compute centered ADD loss for each sample
-        # For symmetric objects, use ADD-S; for asymmetric, use ADD
-        rot_losses = []
-        for i, cid in enumerate(class_ids):
-            if self.symmetry_lookup[cid.long()]:
-                # Symmetric: use Nearest Neighbor matching
-                l = compute_adds_rot_loss(
-                    pred_R[i:i+1], 
-                    gt_R[i:i+1], 
-                    batch_points[i:i+1]
-                )
-            else:
-                # Asymmetric: point-to-point matching
-                l = compute_add_rot_loss(
-                    pred_R[i:i+1], 
-                    gt_R[i:i+1], 
-                    batch_points[i:i+1]
-                )
-            rot_losses.append(l)
-        loss_rot = torch.mean(torch.cat(rot_losses))  # Average over batch
+        # Symmetry mask: True for symmetric objects (Eggbox, Glue)
+        is_symmetric = self.symmetry_lookup[class_ids.long()]  # (B,)
         
-        # --- L_trans: Pure Translation L1 ---
-        loss_trans = F.l1_loss(pred_trans, gt_trans)  # Direct L1 on [x, y, z]
+        # Compute both ADD and ADD-S for entire batch
+        loss_add = compute_add_rot_loss(pred_R, gt_R, batch_points)    # (B,) asymmetric
+        loss_adds = compute_adds_rot_loss(pred_R, gt_R, batch_points)  # (B,) symmetric
+        
+        # Select correct loss per sample using boolean mask
+        loss_rot = torch.where(is_symmetric, loss_adds, loss_add).mean()
+        
+        # --- L_trans: Pure Translation L1 (in METERS) ---
+        loss_trans = F.l1_loss(pred_trans, gt_trans)
         
         # --- L_proj: 2D Projection (optional regularization) ---
         loss_proj = F.smooth_l1_loss(pred_2d, gt_2d_target, beta=1.0)
@@ -146,8 +135,7 @@ class ExtensionLoss(nn.Module):
         with torch.no_grad():
             trans_err_cm = torch.norm(pred_trans - gt_trans, p=2, dim=1).mean() * 100
             proj_err_px = torch.norm(pred_2d - gt_2d_target, p=2, dim=1).mean()
-            # 🎯 DISACCOPPIAMENTO TOTALE: Calcola errore su TUTTO il batch
-            # Gestisce correttamente simmetrici (ADD-S) e asimmetrici (geodesic)
+            # Rotation error (handles symmetric/asymmetric automatically)
             rot_err_deg = compute_batch_rotation_error(
                 pred_quat, gt_quat, class_ids, 
                 self.symmetry_lookup, self.model_points_bank
@@ -160,5 +148,5 @@ class ExtensionLoss(nn.Module):
             'proj_loss': loss_proj.detach(),
             'trans_err_cm': trans_err_cm,
             'proj_err_px': proj_err_px,
-            'rot_err_deg': rot_err_deg  # 🎯 Rinominato (no 'asymm')
+            'rot_err_deg': rot_err_deg
         }

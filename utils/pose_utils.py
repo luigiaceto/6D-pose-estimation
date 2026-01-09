@@ -8,6 +8,7 @@ IMG_WIDTH = 640
 IMG_HEIGHT = 480
 
 SYMMETRIC_OBJECTS = [10, 11]
+N_POINTS_TO_LOAD = 2000
 
 # Traduzione da YOLO (0,1,2...) a LINEMOD (1,2,4...)
 YOLO_TO_LINEMOD_MAP = {
@@ -45,37 +46,26 @@ def yolo_to_xyxy(yolo_box, img_width, img_height):
     return [x1, y1, x2, y2]
 
 
-def compute_translation_from_depth_crop(cropped_depth, pred_uv, cam_k, bbox_center, bbox_dims, z_net=None, use_bbox_center_only=True):
+def compute_translation_from_depth_crop(cropped_depth, pred_uv, cam_k, bbox_center, bbox_dims):
     """
     Versione ROBUSTA + CENTER MODE.
     use_bbox_center_only: Se True, ignora l'offset predetto dalla rete e assume che 
                           il centro dell'oggetto sia il centro geometrico del BBox.
     """
     B, _, H, W = cropped_depth.shape 
-    IMG_W, IMG_H = 640.0, 480.0
     
     # 1. Calcolo Scala (Zoom Factor)
-    w_px = bbox_dims[:, 0] * IMG_W
-    h_px = bbox_dims[:, 1] * IMG_H
+    w_px = bbox_dims[:, 0] * IMG_WIDTH
+    h_px = bbox_dims[:, 1] * IMG_HEIGHT
     max_dim = torch.max(w_px, h_px)
     scale_factor = W / torch.clamp(max_dim, min=1.0)
     
-    # --- LOGICA DI PUNTAMENTO ---
-    if use_bbox_center_only:
-        # FEDERICO MODE: Ci fidiamo del BBox. 
-        # Il centro dell'oggetto è il centro del crop (W/2, H/2).
-        u_local = torch.full((B,), W/2, device=cropped_depth.device)
-        v_local = torch.full((B,), H/2, device=cropped_depth.device)
-        
-        # Per calcolare X e Y finali, usiamo le coordinate globali del centro BBox
-        pred_uv_final = bbox_center
-    else:
-        # OFFSET MODE (Tua Rete): Usiamo l'offset predetto
-        delta_uv_global = pred_uv - bbox_center 
-        delta_uv_crop = delta_uv_global * scale_factor.unsqueeze(1)
-        u_local = delta_uv_crop[:, 0] + (W / 2)
-        v_local = delta_uv_crop[:, 1] + (H / 2)
-        pred_uv_final = pred_uv
+ 
+    delta_uv_global = pred_uv - bbox_center 
+    delta_uv_crop = delta_uv_global * scale_factor.unsqueeze(1)
+    u_local = delta_uv_crop[:, 0] + (W / 2)
+    v_local = delta_uv_crop[:, 1] + (H / 2)
+    pred_uv_final = pred_uv
 
     # 2. Campionamento Adattivo (Kernel 5x5)
     # Kernel ridotto per evitare di pescare lo sfondo su oggetti sottili
@@ -100,23 +90,28 @@ def compute_translation_from_depth_crop(cropped_depth, pred_uv, cam_k, bbox_cent
     flat_indices = (sample_v * W + sample_u).long()
     z_patches = torch.gather(cropped_depth.view(B, -1), 1, flat_indices)
     
-    # 3. Filtraggio Ibrido (Mediana Geometrica + Fallback Rete)
+    # 3. Filtraggio Robusto con Intelligent Fallback
     sorted_z, _ = torch.sort(z_patches, dim=1)
-    z_geom = sorted_z[:, z_patches.shape[1] // 2] # Mediana
+    z_geom = sorted_z[:, z_patches.shape[1] // 2]  # Mediana
     
-    # Unità mm -> m
+    # Unità mm -> m (se necessario)
     z_geom = torch.where(z_geom > 100.0, z_geom / 1000.0, z_geom)
     
-    # Fallback sulla rete se disponibile
-    if z_net is not None:
-        z_net = z_net.view(-1)
-        z_net = torch.where(z_net > 100.0, z_net / 1000.0, z_net)
+    # Filtro di validità: accetta solo depth nel range realistico [0.1m, 3.0m]
+    valid_mask = (z_geom > 0.1) & (z_geom < 3.0)
+    
+    # INTELLIGENT FALLBACK: Usa la media dei valori validi nel batch corrente
+    if valid_mask.any():
+        # Calcola media solo sui campioni validi
+        batch_mean = z_geom[valid_mask].mean()
+        z_fallback = batch_mean
     else:
-        z_net = torch.ones_like(z_geom) * 0.5 # Dummy fallback
-
-    # Usa la geometria se il valore è sensato (tra 10cm e 5m), altrimenti usa la rete
-    valid_mask = (z_geom > 0.1) & (z_geom < 5.0)
-    z_final = torch.where(valid_mask, z_geom, z_net)
+        # Se nessun valore valido, usa stima conservativa
+        z_fallback = torch.tensor(0.5, device=z_geom.device, dtype=z_geom.dtype)
+    
+    # Sostituisci valori invalidi con il fallback intelligente
+    z_final = torch.where(valid_mask, z_geom, z_fallback)
+    z_final = torch.clamp(z_final, min=0.1, max=3.0)  # Safety clamp finale nel range valido
     
     # 4. Back-Projection (Pinhole)
     fx, fy, cx, cy = cam_k[:, 0], cam_k[:, 1], cam_k[:, 2], cam_k[:, 3]
@@ -263,7 +258,7 @@ def compute_geodesic_loss(pred_quat, gt_quat):
     
     return torch.mean(sin_half)
 
-def compute_batch_rotation_error(pred_quat, gt_quat, class_ids, symmetry_lookup, model_points_bank):
+def compute_batch_rotation_error(pred_quat, gt_quat, class_ids, symmetry_lookup, model_points):
     """
     Calcola l'errore di rotazione medio in GRADI per l'intero batch,
     gestendo correttamente le simmetrie per evitare falsi positivi.
@@ -286,7 +281,7 @@ def compute_batch_rotation_error(pred_quat, gt_quat, class_ids, symmetry_lookup,
             # Convertiamo in matrici per trasformare i punti
             p_R = quaternion_to_rotation_matrix(pred_quat[is_sym])
             g_R = quaternion_to_rotation_matrix(gt_quat[is_sym])
-            pts = model_points_bank[class_ids[is_sym].long()] # (B_sym, N, 3)
+            pts = model_points[class_ids[is_sym].long()] # (B_sym, N, 3)
             
             # Applichiamo rotazione ai punti (senza traslazione)
             pts_t = pts.transpose(1, 2)
@@ -397,58 +392,44 @@ def compute_add_s_rotation_only(pred_R, gt_R, model_points):
     return np.mean(min_distances)
 
 
-def compute_rotation_error(pred_R, gt_R):
-    """Errore di rotazione in gradi (standard per oggetti asimmetrici)."""
-    R_diff = pred_R.T @ gt_R
-    trace = np.trace(R_diff)
-    cos_angle = np.clip((trace - 1) / 2, -1.0, 1.0)
-    angle_rad = np.arccos(cos_angle)
-    return np.degrees(angle_rad)
+def compute_rotation_error(pred_R, gt_R, class_id, model_points):
+    """
+    Funzione UNIFICATA (NumPy) per l'Evaluation Loop.
+    Sostituisce sia compute_rotation_error che compute_rotation_error_symmetric.
+    
+    Logica:
+    1. Controlla se class_id è nella lista globale SYMMETRIC_OBJECTS.
+    2. Se SÌ -> Usa calcolo geometrico (ADD-S logic) sui punti.
+    3. Se NO -> Usa calcolo algebrico standard.
+    """
+    
+    # 1. Controllo Simmetria (Usa la lista globale definita in cima al file)
+    is_symmetric = (class_id in SYMMETRIC_OBJECTS)
 
-def compute_rotation_error_symmetric(pred_R, gt_R, points):
-    """
-    Errore di rotazione SYMMETRY-AWARE per oggetti simmetrici.
+    # --- CASO SIMMETRICO (Eggbox, Glue) ---
+    if is_symmetric:
+        
+        mean_dist = compute_add_s_rotation_only(pred_R, gt_R, model_points)
+        avg_radius = np.mean(np.linalg.norm(model_points, axis=1))
+
+        ratio = mean_dist / avg_radius
+        angle_rad = 2 * np.arcsin(np.clip(ratio / 2.0, -1.0, 1.0))
+
+        return np.degrees(angle_rad)
     
-    Calcola l'errore minimo considerando tutte le possibili rotazioni simmetriche.
-    Per oggetti come Eggbox (180° di simmetria), non penalizza rotazioni equivalenti.
-    
-    Usa ADD-S centrato: applica rotazioni ai punti centrati e trova matching minimo.
-    
-    Args:
-        pred_R: (3, 3) matrice di rotazione predetta
-        gt_R: (3, 3) matrice di rotazione ground truth
-        points: (N, 3) punti del modello 3D
-    
-    Returns:
-        float: errore di rotazione in gradi (minimo considerando simmetrie)
-    """
-    # Centra i punti nell'origine
-    points_centered = points - points.mean(axis=0, keepdims=True)
-    
-    # Applica rotazioni
-    pred_pts = (pred_R @ points_centered.T).T  # (N, 3)
-    gt_pts = (gt_R @ points_centered.T).T      # (N, 3)
-    
-    # Calcola distanza minima punto-a-punto (ADD-S centrato)
-    # Per ogni punto predetto, trova il punto GT più vicino
-    from scipy.spatial.distance import cdist
-    dist_matrix = cdist(pred_pts, gt_pts, metric='euclidean')  # (N, N)
-    min_dists = dist_matrix.min(axis=1)  # (N,)
-    
-    # Errore medio come proxy dell'errore angolare
-    # Converti distanza euclidea in angolo approssimato
-    mean_dist = min_dists.mean()
-    
-    # Per sfere unitarie: dist ≈ 2*sin(angle/2)
-    # Inverti per ottenere angle ≈ 2*arcsin(dist/2)
-    angle_rad = 2 * np.arcsin(np.clip(mean_dist / 2.0, 0.0, 1.0))
-    
-    return np.degrees(angle_rad)
+
+    # --- CASO ASIMMETRICO (Ape, Cat, ecc.) ---
+    else:
+        # Calcolo standard Geodetico
+        R_diff = pred_R.T @ gt_R
+        trace = np.trace(R_diff)
+        cos_angle = np.clip((trace - 1) / 2, -1.0, 1.0)
+        return np.degrees(np.arccos(cos_angle))
 
 
 def compute_translation_error(pred_t, gt_t):
-    """Errore di translation in cm."""
-    return np.linalg.norm(pred_t - gt_t) * 100  # m -> cm
+    """Errore di translation in CM (già convertito per compatibilità con codice esistente)."""
+    return np.linalg.norm(pred_t - gt_t) * 100  # metri -> cm
 
 
 def print_evaluation_results_table(metrics_per_class, save_table=False, table_path="evaluation_results.csv"):
@@ -462,26 +443,27 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
     
     df['Object Name'] = df['class_id'].map(LINEMOD_OBJECT_NAMES)
     df = df.drop(columns=['class_id'])
+    
+    # Converti solo ADD da metri a cm (trans_mean è già in cm da compute_translation_error)
+    df['add_mean'] = df['add_mean'] * 100
+    
     df = df.rename(
         columns={
             'object_name': 'Object Name',
             'num_samples': '#Samples',
             'rot_mean': 'Rotation Error (deg)',
             'trans_mean': 'Translation Error (cm)',
-            'z_mean': 'Z-Error (cm)',  # 🎯 NUOVA COLONNA
             'add_mean': 'ADD(-S) (cm)',
             'accuracy_10p': 'Accuracy @10% (%)'
         }
     )
 
-    # Riordina colonne per mostrare Z-Error dopo Translation
     df = df[
         [
             'Object Name',
             '#Samples',
             'Rotation Error (deg)',
             'Translation Error (cm)',
-            'Z-Error (cm)',  # 🎯 Profondita separata
             'ADD(-S) (cm)',
             'Accuracy @10% (%)'
         ]

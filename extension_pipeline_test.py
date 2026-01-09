@@ -12,13 +12,14 @@ from models.TridentNetPose import TridentNetPose
 from utils.pose_utils import (
     compute_rotation_error, 
     compute_translation_error,
-    batch_add_loss,
-    batch_adds_loss,
-    load_all_models_points, 
+    batch_compute_add_metric,
+    batch_compute_add_s_metric,
+    load_models_points, 
     quaternion_to_rotation_matrix,
     print_evaluation_results_table,
     SYMMETRIC_OBJECTS,
-    YOLO_TO_LINEMOD_MAP
+    YOLO_TO_LINEMOD_MAP,
+    N_POINTS_TO_LOAD
 )
 
 def evaluate_extension_pipeline(
@@ -32,16 +33,17 @@ def evaluate_extension_pipeline(
 ):
     
     if test_loader.batch_size != 1:
-        print("⚠️ WARNING: Full Pipeline Evaluation richiede batch_size=1.")
+        print("WARNING: Full Pipeline Evaluation richiede batch_size=1.")
     
     object_diameters = test_dataset.get_object_diameters()
     
-    print("⏳ Preloading mesh points for GPU evaluation...")
-    mesh_points_cache = load_all_models_points(dataset_root, num_points=1000)
+    num_points = N_POINTS_TO_LOAD
+    print(f"Preloading mesh points for GPU evaluation (num_points={num_points})...")
+    mesh_points_cache = load_models_points(dataset_root, num_points=num_points)
     # Spostiamo su GPU subito
     for k, v in mesh_points_cache.items():
         mesh_points_cache[k] = v.to(device)
-    print(f"✅ Loaded {len(mesh_points_cache)} objects.")
+    print(f"✅ Loaded {len(mesh_points_cache)} objects with {num_points} points each.")
 
     yolo = YOLO(yolo_checkpoint)
     
@@ -119,21 +121,22 @@ def evaluate_extension_pipeline(
             pred_q, pred_t, _ = pose_model(rgb_batch, depth_batch, bbox_center_tensor, bbox_dims_tensor)
             pred_R = quaternion_to_rotation_matrix(pred_q) # (1, 3, 3)
 
-        # Reshape translaton per le funzioni batch (1, 3, 1)
+        # Reshape translation per le funzioni batch (1, 3, 1)
         pred_t_b = pred_t.unsqueeze(-1)
         gt_t_b = gt_t.unsqueeze(-1)
         
-        # Recupera punti mesh dalla cache (1, N, 3)
-        batch_points = mesh_points_cache[gt_obj_id].unsqueeze(0) 
+        # Recupera punti mesh dalla cache
+        model_points_torch = mesh_points_cache[gt_obj_id].unsqueeze(0)  # (1, N, 3)
+        model_points_np = mesh_points_cache[gt_obj_id].cpu().numpy()    # Per compute_rotation_error
 
         if gt_obj_id in SYMMETRIC_OBJECTS:
-            loss_val = batch_adds_loss(pred_R, pred_t_b, gt_R, gt_t_b, batch_points)
+            add_val = batch_compute_add_s_metric(pred_R, pred_t_b, gt_R, gt_t_b, model_points_torch).item()  # METRI
         else:
-            loss_val = batch_add_loss(pred_R, pred_t_b, gt_R, gt_t_b, batch_points)
+            add_val = batch_compute_add_metric(pred_R, pred_t_b, gt_R, gt_t_b, model_points_torch).item()  # METRI
             
-        add_cm = loss_val.item() * 100 # m -> cm
-        r_err = compute_rotation_error(pred_R[0].cpu().numpy(), gt_R[0].cpu().numpy())
-        t_err = compute_translation_error(pred_t[0].cpu().numpy(), gt_t[0].cpu().numpy())
+        add_cm = add_val * 100  # METRI -> CM
+        r_err = compute_rotation_error(pred_R[0].cpu().numpy(), gt_R[0].cpu().numpy(), gt_obj_id, model_points_np)
+        t_err = compute_translation_error(pred_t[0].cpu().numpy(), gt_t[0].cpu().numpy())  # METRI
         diameter = object_diameters[gt_obj_id]
         
         per_class_metrics[gt_obj_id].append({
@@ -160,8 +163,11 @@ def evaluate_extension_pipeline(
     per_class_results = []
     for class_id, metrics in sorted(per_class_metrics.items()):
         metrics_df = pd.DataFrame(metrics)
-        diam_cm = object_diameters[class_id] / 10.0
-        acc_10p = np.mean(metrics_df['add'] < (diam_cm * 0.1)) * 100
+        diam_m = object_diameters[class_id] / 1000.0  # MM -> METRI
+        threshold_m = diam_m * 0.1  # 10% in METRI
+        # metrics_df['add'] è in CM, convertiamo in METRI per confronto
+        add_m = metrics_df['add'] / 100.0
+        acc_10p = np.mean(add_m < threshold_m) * 100
         
         per_class_results.append({
             'class_id': class_id, 
@@ -172,16 +178,17 @@ def evaluate_extension_pipeline(
             'accuracy_10p': acc_10p
         })
         
-    all_adds = np.array(all_metrics['add'])
-    all_diams_cm = np.array(all_metrics['diameters']) / 10.0
-    acc_all = np.mean(all_adds < (all_diams_cm * 0.1)) * 100
+    all_adds_cm = np.array(all_metrics['add'])  # CM
+    all_adds_m = all_adds_cm / 100.0  # CM -> METRI
+    all_diams_m = np.array(all_metrics['diameters']) / 1000.0  # MM -> METRI
+    acc_all = np.mean(all_adds_m < (all_diams_m * 0.1)) * 100
     
     per_class_results.append({
         'class_id': 'MEAN', 
-        'num_samples': len(all_adds),
+        'num_samples': len(all_adds_cm),
         'rot_mean': np.mean(all_metrics['rot_err']), 
         'trans_mean': np.mean(all_metrics['trans_err']),
-        'add_mean': np.mean(all_adds), 
+        'add_mean': np.mean(all_adds_cm), 
         'accuracy_10p': acc_all
     })
     

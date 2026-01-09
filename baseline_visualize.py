@@ -16,7 +16,13 @@ import torchvision.transforms as transforms
 
 from models.ResNetPose import ResNetPose
 from models.PinholeCamera import PinholeCamera
-from utils.pose_utils import quaternion_to_rotation_matrix, YOLO_TO_LINEMOD_MAP
+from utils.pose_utils import (
+    quaternion_to_rotation_matrix, 
+    YOLO_TO_LINEMOD_MAP,
+    compute_rotation_error,
+    load_models_points,
+    N_POINTS_TO_LOAD
+)
 from utils.visualization import draw_3d_bbox_colored, draw_axis_colored 
 
 def visualize_baseline_predictions(
@@ -62,14 +68,18 @@ def visualize_baseline_predictions(
     
     else:
         # Warning: path manuale
-        print("⚠️  ATTENZIONE: image_path fornito manualmente. Impossibile verificare se è nel test set.")
-        print("   Raccomandazione: usa 'test_dataset' per garantire selezione dal test set.")
+        print("  ATTENZIONE: image_path fornito manualmente. Impossibile verificare se è nel test set.")
+        print("  Raccomandazione: usa 'test_dataset' per garantire selezione dal test set.")
     
     # 2. Load object diameters
     models_info_path = str(dataset_root / "models" / "models_info.yml")
     with open(models_info_path, 'r') as f:
         models_info = yaml.load(f, Loader=yaml.CLoader)
     object_diameters = {obj_id: info['diameter'] for obj_id, info in models_info.items()}
+    
+    # Load model points for rotation error calculation
+    num_points = N_POINTS_TO_LOAD
+    mesh_points_cache = load_models_points(dataset_root, num_points=num_points)
     
     # 3. Load models
     yolo_model = YOLO(yolo_checkpoint)
@@ -234,8 +244,10 @@ def visualize_baseline_predictions(
                 # Calcola errori pose
                 trans_diff = (pred_translation - gt_translation) * 100 
                 trans_error = np.linalg.norm(trans_diff)
-                R_diff = pred_rotation.T @ gt_rotation
-                rot_error = np.degrees(np.arccos(np.clip((np.trace(R_diff) - 1) / 2, -1.0, 1.0)))
+                
+                # Rotation error con gestione simmetria
+                model_points_np = mesh_points_cache[obj_id].numpy()
+                rot_error = compute_rotation_error(pred_rotation, gt_rotation, obj_id, model_points_np)
                 
                 print(f"\n ERRORS:")
                 print(f"     BBox IoU (2D) by YOLO: {bbox_iou:.2%}")

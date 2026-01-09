@@ -8,6 +8,14 @@ from tqdm import tqdm
 from models.ResNetPose import ResNetPose
 from models.PinholeCamera import PinholeCamera
 from models.BaselineLoss import BaselineLoss
+from utils.pose_utils import (
+    compute_batch_rotation_error,
+    load_models_points,
+    SYMMETRIC_OBJECTS,
+    N_POINTS_TO_LOAD
+)
+
+USE_AMP = True 
 
 def train(
     train_dataset,
@@ -39,6 +47,20 @@ def train(
     for obj_id, diameter in object_diameters.items():
         diameter_lookup[obj_id] = diameter
     
+    # Carica model points per rotation error
+    dataset_root = train_dataset.dataset_root
+    num_points = N_POINTS_TO_LOAD
+    print(f"Loading mesh points for rotation error calculation...")
+    mesh_points_cache = load_models_points(dataset_root, num_points=num_points)
+    for k, v in mesh_points_cache.items():
+        mesh_points_cache[k] = v.to(device)
+    print(f"Loaded {len(mesh_points_cache)} objects with {num_points} points each")
+    
+    # Symmetry lookup
+    symmetry_lookup = torch.zeros(max_obj_id + 1, dtype=torch.bool, device=device)
+    for sym_id in SYMMETRIC_OBJECTS:
+        symmetry_lookup[sym_id] = True
+    
     # Model Setup
     model = ResNetPose().to(device)
 
@@ -51,8 +73,12 @@ def train(
         print(f"Turbo Mode: Using {torch.cuda.device_count()} GPUs!")
         model = torch.nn.DataParallel(model)
 
-    # Loss
-    criterion = BaselineLoss(lambda_rotation=1.0, lambda_translation=0.0)
+    # Loss (ora richiede model_points_dict per centered ADD/ADD-S)
+    criterion = BaselineLoss(
+        lambda_rotation=1.0, 
+        lambda_translation=0.0,
+        model_points_dict=mesh_points_cache
+    )
 
     
     # Funzione helper per recuperare il modello "reale" (dentro o fuori DataParallel)
@@ -90,10 +116,10 @@ def train(
         warmup_scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_lambda)
     
     # AMP Setup
-    USE_AMP = True 
     scaler = torch.amp.GradScaler('cuda', enabled=USE_AMP)
     
     best_val_loss = float('inf')
+    best_checkpoint_path = None
     start_epoch = 0
     
     # Resume from checkpoint in caso si volesse rifar partire un training
@@ -213,12 +239,15 @@ def train(
                 )
                 val_losses.append(losses['total_loss'].item())
 
-                # Monitoraggio Errore Rotazione
-                dot_prod = torch.abs(torch.sum(pred_quaternion * gt_quaternion, dim=1))
-                dot_prod = torch.clamp(dot_prod, -1.0, 1.0)
-                angular_dist_rad = 2 * torch.acos(dot_prod)
-                angular_dist_deg = torch.rad2deg(angular_dist_rad).mean().item()
-                val_rot_errors.append(angular_dist_deg)
+                # Monitoraggio Errore Rotazione (come extension)
+                rot_err_deg = compute_batch_rotation_error(
+                    pred_quaternion,
+                    gt_quaternion,
+                    obj_id,
+                    symmetry_lookup,
+                    mesh_points_cache
+                ).item()
+                val_rot_errors.append(rot_err_deg)
         
         avg_val_loss = np.mean(val_losses)
         avg_rot_error = np.mean(val_rot_errors)
@@ -232,6 +261,7 @@ def train(
         
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
+            best_checkpoint_path = str(Path(checkpoint_dir) / checkpoint_name)
             # Salviamo sempre il raw_model per compatibilità futura
             torch.save({
                 'epoch': epoch,
@@ -241,8 +271,8 @@ def train(
                 'lr': lr,
                 'val_loss': avg_val_loss,
                 'rot_error': avg_rot_error
-            }, str(Path(checkpoint_dir) / f"{checkpoint_name}"))
-            print(f"✓ Saved best model (Err: {avg_rot_error:.2f}°)")
-            
+            }, best_checkpoint_path)
+            print(f"✅ Checkpoint salvato: {best_checkpoint_path} (Loss: {best_val_loss:.4f}, Rot: {avg_rot_error:.2f}°)")
     print("\nTraining completed!")
+
     return model

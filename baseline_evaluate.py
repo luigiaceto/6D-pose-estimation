@@ -10,9 +10,7 @@ from models.PinholeCamera import PinholeCamera
 from utils.pose_utils import (
     quaternion_to_rotation_matrix,  
     batch_compute_add_metric, 
-    compute_add_rotation_only, 
     batch_compute_add_s_metric, 
-    compute_add_s_rotation_only, 
     compute_rotation_error,
     compute_translation_error,
     load_models_points,
@@ -20,6 +18,7 @@ from utils.pose_utils import (
     compute_rotation_error,
     compute_translation_error,
     SYMMETRIC_OBJECTS, 
+    N_POINTS_TO_LOAD
 )
 
 
@@ -45,8 +44,8 @@ def evaluate_baseline(
     # Get object diameters
     object_diameters = test_dataset.get_object_diameters()
     
-    # --- FIX CRITICO: CARICA I 1000 PUNTI QUI ---
-    num_points = 1500
+    # Carica i punti del modello 
+    num_points = N_POINTS_TO_LOAD
     print(f" Preloading HIGH RES models ({num_points} points per object)...")
     model_points_dict = load_models_points(dataset_root, num_points=num_points)
     print(f" Loaded {len(model_points_dict)} objects with {num_points} surface points each")

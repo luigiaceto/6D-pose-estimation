@@ -17,19 +17,6 @@ def train_one_epoch(
         device,
     ):
 
-    # 🔥 FINE-TUNING AGGRESSIVO: Scongela TUTTE le teste
-    model.eval()  # Congela backbone (BatchNorm, Dropout)
-    
-    # Riattiva TUTTE le parti che devono imparare
-    model.fusion_fc.train()
-    model.z_head.train()
-    model.offset_head.train()
-    model.rot_head.train() 
-    
-    # Conferma teste in training
-    print(f"📊 Training Heads: fusion_fc={model.fusion_fc.training}, z_head={model.z_head.training}, "
-          f"offset_head={model.offset_head.training}, rot_head={model.rot_head.training}")
-    
     # Inizializzazione Accumulatori (solo loss geometriche)
     total_loss_sum = 0
     rot_loss_sum = 0          # Centered ADD/ADD-S
@@ -49,22 +36,17 @@ def train_one_epoch(
         obj_id = batch['obj_id'].to(device, non_blocking=True).long()
         bbox_dims = batch['bbox_dims'].to(device, non_blocking=True)
         
-        # 🎯 SCALING DEPTH: CNN vuole valori piccoli (mm → m se necessario)
-        net_input_depth = cropped_depth.clone()
-        if net_input_depth.mean() > 10.0:
-            net_input_depth = net_input_depth / 1000.0
-        
         optimizer.zero_grad(set_to_none=True)
         
         with torch.amp.autocast(device_type='cuda', enabled=True):
-            # 1. Forward della rete (restituisce delta_z invece di translation)
+            # SCALING DEPTH: CNN vuole valori piccoli (mm -> m se necessario)
+            net_input_depth = cropped_depth / 1000.0
+            
+            # 1. Forward 
             pred_quat, pred_delta_z, pred_2d = model(cropped_img, net_input_depth, bbox_center, bbox_dims)
             
-            # 2. 🎯 CALCOLA Z GEOMETRICA (robusta, mediana)
-            # Usa la depth map RAW + pred_2d (coordinate predette) per back-projection
             cam_k_batch = criterion.cam_k.repeat(len(pred_quat), 1)
             
-            # solve_translation_geometric_high_precision restituisce (B, 3) -> [tx, ty, tz]
             # Prendiamo solo la Z (indice 2)
             trans_geometric = compute_translation_from_depth_crop(
                 cropped_depth=cropped_depth,      # Depth RAW (non scalata)
@@ -72,25 +54,19 @@ def train_one_epoch(
                 cam_k=cam_k_batch,
                 bbox_center=bbox_center,
                 bbox_dims=bbox_dims,
-                z_net=None,                        # Non serve fallback nel training
-                use_bbox_center_only=False        # Usa offset predetto
             )
             
-            # Estrai solo Z - assicurati che sia (B, 1)
-            if trans_geometric.dim() == 2:  # (B, 3)
-                z_geometric = trans_geometric[:, 2:3]  # (B, 1)
-            else:  # (B, 3, 1) - dovrebbe essere impossibile ma per sicurezza
-                z_geometric = trans_geometric[:, 2, :]  # (B, 1)
+            z_geometric = trans_geometric[:, 2:3]  # (B, 1)
             
             # 3. Calcola loss con z_geometric + delta_z
             loss_dict = criterion(
                 pred_quat=pred_quat, 
-                pred_delta_z=pred_delta_z,         # 🎯 Delta invece di trans completa
+                pred_delta_z=pred_delta_z,         
                 gt_quat=gt_quaternion, 
                 gt_trans=gt_translation, 
                 pred_2d=pred_2d,
                 class_ids=obj_id,
-                z_geometric=z_geometric            # 🎯 Base geometrica
+                z_geometric=z_geometric            
             )
 
             loss = loss_dict['total_loss']
@@ -149,43 +125,38 @@ def validate(
             cropped_depth = batch['cropped_depth'].to(device, non_blocking=True)
             obj_id = batch['obj_id'].to(device, non_blocking=True).long()
             bbox_dims = batch['bbox_dims'].to(device, non_blocking=True)
-            
-            # 🎯 SCALING DEPTH per la rete
-            net_depth = cropped_depth.clone()
-            net_depth = torch.where(net_depth > 100.0, net_depth / 1000.0, net_depth)
 
             with torch.amp.autocast(device_type='cuda', enabled=True):
-                # 1. Forward della rete (restituisce delta_z)
-                pred_quat, pred_delta_z, pred_uv = model(cropped_img, net_depth, bbox_center, bbox_dims)
+                # SCALING DEPTH: CNN vuole valori piccoli (mm -> m se necessario)
+                net_input_depth = cropped_depth.clone()
+                if net_input_depth.mean() > 10.0:
+                    net_input_depth = net_input_depth / 1000.0
                 
-                # 2. 🎯 CALCOLA Z GEOMETRICA per validation
+                # 1. Forward della rete (restituisce delta_z)
+                pred_quat, pred_delta_z, pred_uv = model(cropped_img, net_input_depth, bbox_center, bbox_dims)
+                
+                # 2. CALCOLA Z GEOMETRICA per validation
                 cam_k_batch = criterion.cam_k.repeat(len(pred_quat), 1)
                 
                 trans_geometric = compute_translation_from_depth_crop(
-                    cropped_depth=cropped_depth,   # Depth RAW
+                    cropped_depth=cropped_depth, 
                     pred_uv=pred_uv, 
                     cam_k=cam_k_batch, 
                     bbox_center=bbox_center, 
                     bbox_dims=bbox_dims,
-                    z_net=None,
-                    use_bbox_center_only=False
                 )
                 
-                # Estrai solo Z - assicurati che sia (B, 1)
-                if trans_geometric.dim() == 2:  # (B, 3)
-                    z_geometric = trans_geometric[:, 2:3]  # (B, 1)
-                else:  # (B, 3, 1)
-                    z_geometric = trans_geometric[:, 2, :]  # (B, 1)
+                z_geometric = trans_geometric[:, 2:3]  # (B, 1)
                 
                 # 3. Calcola loss
                 loss_dict = criterion(
                     pred_quat=pred_quat, 
-                    pred_delta_z=pred_delta_z,     # 🎯 Delta
+                    pred_delta_z=pred_delta_z,    
                     gt_quat=gt_quaternion, 
                     gt_trans=gt_translation, 
                     pred_2d=pred_uv,
                     class_ids=obj_id,
-                    z_geometric=z_geometric        # 🎯 Base geometrica
+                    z_geometric=z_geometric      
                 )
             
             # logging (solo loss geometriche)
@@ -232,7 +203,6 @@ def train(
     """
     Training con LOSS PURAMENTE GEOMETRICHE + Curriculum Learning.
     
-    Eliminata completamente Geodesic/Quaternion Loss algebrica.
     Usa solo:
     - L_rot: Centered ADD/ADD-S (isola rotazione)
     - L_trans: Pure Translation L1
@@ -304,7 +274,7 @@ def train(
         
         if reset_training:
             # 🔥 RESET MODE: Carica solo i pesi, riparte da Epoch 0
-            print(">>> ⚠️ RESET TRAINING ATTIVO: Re-inizializzo le HEAD (Z e Rot) e riparto da Epoch 0.")
+            print(">>> RESET TRAINING ATTIVO: Re-inizializzo le HEAD (Z e Rot) e riparto da Epoch 0.")
             print(">>> Si riparte da Epoch 0 con i nuovi Learning Rate.")
             print(f"    - RGB Backbone LR: {lr_rgb_backbone:.2e}")
             print(f"    - New Components LR: {lr_new_components:.2e}")
@@ -332,7 +302,6 @@ def train(
             best_loss = float('inf')
             # Non carichiamo optimizer/scheduler/scaler (usiamo quelli freschi)
         else:
-            # ✅ RESUME MODE: Continua da dove era rimasto
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
             
@@ -351,14 +320,14 @@ def train(
     for epoch in range(start_epoch, epochs):
         print(f"\nEpoch {epoch+1}/{epochs}")
         
-        # 🎯 CURRICULUM LEARNING: Aggiorna pesi dinamicamente (solo loss geometriche)
+        # Aggiorna pesi dinamicamente
         current_rot = get_weight_value(rot_weight, epoch, switch_epoch)
         current_trans = get_weight_value(trans_weight, epoch, switch_epoch)
         current_proj = get_weight_value(proj_weight, epoch, switch_epoch)
         
         # Notifica switch se siamo esattamente all'epoca di cambio
         if epoch == switch_epoch:
-            print(f"\n🔄 CURRICULUM SWITCH @ Epoch {epoch+1}:")
+            print(f"\n CURRICULUM SWITCH @ Epoch {epoch+1}:")
             if isinstance(rot_weight, (tuple, list)):
                 print(f"   ROT:   {rot_weight[0]:.2f} → {rot_weight[1]:.2f}")
             if isinstance(trans_weight, (tuple, list)):

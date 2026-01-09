@@ -12,6 +12,7 @@ from ultralytics import YOLO
 from models.TridentNetPose import TridentNetPose
 from utils.pose_utils import quaternion_to_rotation_matrix, YOLO_TO_LINEMOD_MAP
 from utils.visualization import draw_3d_bbox_colored, draw_axis_colored
+from utils.pose_utils import compute_translation_from_depth_crop
 
 # =============================================================================
 # HELPER PER DEPTH PROCESSING
@@ -202,8 +203,6 @@ def visualize_fusion_predictions(
                 pred_quat, pred_delta_z, pred_uv = pose_model(tensor_rgb, tensor_depth, tensor_center, tensor_bbox_dims)
                 
                 # Ricostruisci translation con residual learning
-                from utils.pose_utils import compute_translation_from_depth_crop
-                
                 cam_k_tensor = torch.tensor([cam_k[0], cam_k[4], cam_k[2], cam_k[5]], device=device).unsqueeze(0)
                 
                 # Calcola Z geometrico robusto
@@ -213,16 +212,9 @@ def visualize_fusion_predictions(
                     cam_k=cam_k_tensor,
                     bbox_center=tensor_center,
                     bbox_dims=tensor_bbox_dims,
-                    z_net=None,
-                    use_bbox_center_only=False
                 )
                 
-                # Estrai Z e applica correzione
-                if trans_geometric.dim() == 2:  # (B, 3)
-                    z_geometric = trans_geometric[:, 2:3]
-                else:  # (B, 3, 1)
-                    z_geometric = trans_geometric[:, 2, :]
-                    
+                z_geometric = trans_geometric[:, 2:3]
                 z_final = z_geometric + pred_delta_z  # (1, 1)
                 
                 # Back-projection completa
@@ -236,7 +228,6 @@ def visualize_fusion_predictions(
             pred_t_np = pred_trans[0].cpu().numpy() # [x, y, z] in metri
             pred_q_np = pred_quat[0].cpu().numpy()
             pred_R_np = quaternion_to_rotation_matrix(pred_quat)[0].cpu().numpy()
-            pred_uv_np = pred_uv[0].cpu().numpy()
             
             # --- F. Recupera Ground Truth ---
             class_id = int(boxes.cls[i])
