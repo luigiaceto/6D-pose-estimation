@@ -232,7 +232,6 @@ class CustomDatasetPose(Dataset):
         if self.split != 'train':
             return bbox  # Nessun jitter in val/test
         
-        # il 20% delle volte in training la rete vede BBOX perfetti (ground truth)
         if np.random.rand() < 0.2:
             return bbox
 

@@ -64,7 +64,7 @@ def visualize_fusion_predictions(
     sample_idx=None,
     image_path=None,
     yolo_checkpoint=str(Path("checkpoints") / "best.pt"),
-    fusion_checkpoint=str(Path("checkpoints") / "best_fusion_model.pt"), # Checkpoint Extension
+    model_checkpoint=str(Path("checkpoints") / "best_fusion_model.pt"), # Checkpoint Extension
     device='cuda',
     figsize=(12, 8),
     img_mean=[0.485, 0.456, 0.406],
@@ -104,9 +104,9 @@ def visualize_fusion_predictions(
     print(f"Loading YOLO: {yolo_checkpoint}")
     yolo_model = YOLO(yolo_checkpoint)
     
-    print(f"Loading TridentNetPose: {fusion_checkpoint}")
+    print(f"Loading TridentNetPose: {model_checkpoint}")
     pose_model = TridentNetPose(cam_k=cam_k).to(device)
-    checkpoint = torch.load(fusion_checkpoint, map_location=device)
+    checkpoint = torch.load(model_checkpoint, map_location=device)
     pose_model.load_state_dict(checkpoint['model_state_dict']) # Assumendo salvataggio standard
     pose_model.eval()
     

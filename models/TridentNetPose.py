@@ -75,7 +75,7 @@ class TridentNetPose(nn.Module):
             nn.Dropout(0.5)
         )
         
-        # ========== 3 teste finali ========== idee nomi modello: ChimeraPose, TridentNet, HydraPose, Hecate6D, DeltaPose, Fusio3, CerberusNet
+        # ========== 3 teste finali ==========
         # --- Head Rotazione ---
         self.rot_head = nn.Linear(1024, 4) # Output: 4 quaternioni
         

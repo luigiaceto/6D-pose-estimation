@@ -36,9 +36,10 @@ def evaluate_extension_batch(
     model.eval()
     
     object_diameters = test_dataset.get_object_diameters() 
-    
+    num_points = 1500
     print("Preloading mesh points for batch evaluation...")
-    mesh_points_cache = load_models_points(dataset_root, num_points=2000)
+    mesh_points_cache = load_models_points(dataset_root, num_points=num_points)
+    print(f"Loaded {len(mesh_points_cache)} objects with {num_points} surface points each")
     
     # Spostiamo tutti i punti sulla GPU subito per velocità
     for k, v in mesh_points_cache.items():
@@ -48,15 +49,12 @@ def evaluate_extension_batch(
     all_add = []
     all_rot_errors = []
     all_trans_errors = []
-    all_z_errors = []  # 🎯 NUOVO: Errore Z separato
     all_diameters = []
     per_class_metrics = defaultdict(list)
     
     print("Evaluating RGB-D Extension (BATCH MODE)...")
-    
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="Test Batch"):
-            
             # Dati su GPU
             rgb = batch['cropped_img'].to(device)
             depth = batch['cropped_depth'].to(device)
@@ -96,13 +94,6 @@ def evaluate_extension_batch(
             else:  # (B, 3, 1)
                 z_geometric = trans_geometric[:, 2, :]  # (B, 1)
             
-            # 🎯 SKIN-TO-HEART FIX: Aggiungi raggio oggetto
-            # z_geometric dà la distanza alla SUPERFICIE dell'oggetto
-            # Per ottenere il CENTROIDE, aggiungi il raggio
-            radii = torch.tensor(
-                [object_diameters[int(oid)] / 2000.0 for oid in obj_ids],  # mm -> m, poi /2 per raggio
-                device=device
-            ).unsqueeze(1)  # (B, 1)
             
             z_final = z_geometric + pred_delta_z  # (B, 1)
             
@@ -143,9 +134,6 @@ def evaluate_extension_batch(
             gt_t_np = gt_trans.cpu().numpy()
             ids_np = obj_ids.cpu().numpy()
             
-            # Punti mesh per symmetry-aware rotation error
-            batch_points_np = batch_points.cpu().numpy()
-            
             for i in range(batch_size):
                 oid = int(ids_np[i])
                 diameter = object_diameters[oid]
@@ -156,33 +144,19 @@ def evaluate_extension_batch(
                 else:
                     final_add = add_res[i]
                 
-                # 🎯 SYMMETRY-AWARE ROTATION ERROR
-                if oid in SYMMETRIC_OBJECTS:
-                    # Usa metrica che considera simmetrie
-                    rot_err = compute_rotation_error_symmetric(
-                        pred_R_np[i], gt_R_np[i], batch_points_np[i]
-                    )
-                else:
-                    # Standard algebraic error per asimmetrici
-                    rot_err = compute_rotation_error(pred_R_np[i], gt_R_np[i])
-                
-                # Translation error (distanza euclidea 3D)
+                # Calcolo errori classici (rot/trans)
+                # Nota: compute_rotation_error è leggero, si può lasciare in numpy
+                rot_err = compute_rotation_error(pred_R_np[i], gt_R_np[i])
                 trans_err = compute_translation_error(pred_t_np[i], gt_t_np[i])
                 
-                # 🎯 Z-Error separato (solo asse di profondità)
-                z_err = np.abs(pred_t_np[i][2] - gt_t_np[i][2]) * 100  # m -> cm
-                
-                # Salvataggio
                 all_add.append(final_add)
                 all_rot_errors.append(rot_err)
                 all_trans_errors.append(trans_err)
-                all_z_errors.append(z_err)  # 🎯 Z-Error
                 all_diameters.append(diameter)
                 
                 per_class_metrics[oid].append({
                     'rotation': rot_err,
                     'translation': trans_err,
-                    'z_error': z_err,  # 🎯 Z-Error
                     'add': final_add
                 })
 
@@ -206,7 +180,6 @@ def evaluate_extension_batch(
             'num_samples': len(metrics),
             'rot_mean': metrics_df['rotation'].mean(),
             'trans_mean': metrics_df['translation'].mean(),
-            'z_mean': metrics_df['z_error'].mean(),  # 🎯 Z-Error
             'add_mean': metrics_df['add'].mean(),
             'accuracy_10p': cls_acc
         })
@@ -216,7 +189,6 @@ def evaluate_extension_batch(
         'num_samples': len(all_add),
         'rot_mean': np.mean(all_rot_errors),
         'trans_mean': np.mean(all_trans_errors),
-        'z_mean': np.mean(all_z_errors),  # 🎯 Z-Error medio
         'add_mean': np.mean(all_add),
         'accuracy_10p': accuracy
     })
