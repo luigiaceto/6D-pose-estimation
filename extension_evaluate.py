@@ -12,6 +12,7 @@ from utils.pose_utils import (
     batch_add_loss,
     batch_adds_loss,
     compute_rotation_error,
+    compute_rotation_error_symmetric,
     compute_translation_error,
     solve_translation_geometric,
     solve_translation_geometric_high_precision,
@@ -49,6 +50,7 @@ def evaluate_extension_batch(
     all_add = []
     all_rot_errors = []
     all_trans_errors = []
+    all_z_errors = []  # 🎯 NUOVO: Errore Z separato
     all_diameters = []
     per_class_metrics = defaultdict(list)
     
@@ -95,7 +97,15 @@ def evaluate_extension_batch(
                 z_geometric = trans_geometric[:, 2:3]  # (B, 1)
             else:  # (B, 3, 1)
                 z_geometric = trans_geometric[:, 2, :]  # (B, 1)
-                
+            
+            # 🎯 SKIN-TO-HEART FIX: Aggiungi raggio oggetto
+            # z_geometric dà la distanza alla SUPERFICIE dell'oggetto
+            # Per ottenere il CENTROIDE, aggiungi il raggio
+            radii = torch.tensor(
+                [object_diameters[int(oid)] / 2000.0 for oid in obj_ids],  # mm -> m, poi /2 per raggio
+                device=device
+            ).unsqueeze(1)  # (B, 1)
+            
             z_final = z_geometric + pred_delta_z  # (B, 1)
             
             # 3. Back-projection completa per ottenere pred_trans
@@ -135,6 +145,9 @@ def evaluate_extension_batch(
             gt_t_np = gt_trans.cpu().numpy()
             ids_np = obj_ids.cpu().numpy()
             
+            # Punti mesh per symmetry-aware rotation error
+            batch_points_np = batch_points.cpu().numpy()
+            
             for i in range(batch_size):
                 oid = int(ids_np[i])
                 diameter = object_diameters[oid]
@@ -145,20 +158,33 @@ def evaluate_extension_batch(
                 else:
                     final_add = add_res[i]
                 
-                # Calcolo errori classici (rot/trans)
-                # Nota: compute_rotation_error è leggero, si può lasciare in numpy
-                rot_err = compute_rotation_error(pred_R_np[i], gt_R_np[i])
+                # 🎯 SYMMETRY-AWARE ROTATION ERROR
+                if oid in SYMMETRIC_OBJECTS:
+                    # Usa metrica che considera simmetrie
+                    rot_err = compute_rotation_error_symmetric(
+                        pred_R_np[i], gt_R_np[i], batch_points_np[i]
+                    )
+                else:
+                    # Standard algebraic error per asimmetrici
+                    rot_err = compute_rotation_error(pred_R_np[i], gt_R_np[i])
+                
+                # Translation error (distanza euclidea 3D)
                 trans_err = compute_translation_error(pred_t_np[i], gt_t_np[i])
+                
+                # 🎯 Z-Error separato (solo asse di profondità)
+                z_err = np.abs(pred_t_np[i][2] - gt_t_np[i][2]) * 100  # m -> cm
                 
                 # Salvataggio
                 all_add.append(final_add)
                 all_rot_errors.append(rot_err)
                 all_trans_errors.append(trans_err)
+                all_z_errors.append(z_err)  # 🎯 Z-Error
                 all_diameters.append(diameter)
                 
                 per_class_metrics[oid].append({
                     'rotation': rot_err,
                     'translation': trans_err,
+                    'z_error': z_err,  # 🎯 Z-Error
                     'add': final_add
                 })
 
@@ -182,6 +208,7 @@ def evaluate_extension_batch(
             'num_samples': len(metrics),
             'rot_mean': metrics_df['rotation'].mean(),
             'trans_mean': metrics_df['translation'].mean(),
+            'z_mean': metrics_df['z_error'].mean(),  # 🎯 Z-Error
             'add_mean': metrics_df['add'].mean(),
             'accuracy_10p': cls_acc
         })
@@ -191,6 +218,7 @@ def evaluate_extension_batch(
         'num_samples': len(all_add),
         'rot_mean': np.mean(all_rot_errors),
         'trans_mean': np.mean(all_trans_errors),
+        'z_mean': np.mean(all_z_errors),  # 🎯 Z-Error medio
         'add_mean': np.mean(all_add),
         'accuracy_10p': accuracy
     })

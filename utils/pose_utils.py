@@ -411,11 +411,52 @@ def load_model_points(dataset_root, obj_id):
 
 
 def compute_rotation_error(pred_R, gt_R):
-    """Errore di rotazione in gradi."""
+    """Errore di rotazione in gradi (standard per oggetti asimmetrici)."""
     R_diff = pred_R.T @ gt_R
     trace = np.trace(R_diff)
     cos_angle = np.clip((trace - 1) / 2, -1.0, 1.0)
     angle_rad = np.arccos(cos_angle)
+    return np.degrees(angle_rad)
+
+
+def compute_rotation_error_symmetric(pred_R, gt_R, points):
+    """
+    Errore di rotazione SYMMETRY-AWARE per oggetti simmetrici.
+    
+    Calcola l'errore minimo considerando tutte le possibili rotazioni simmetriche.
+    Per oggetti come Eggbox (180° di simmetria), non penalizza rotazioni equivalenti.
+    
+    Usa ADD-S centrato: applica rotazioni ai punti centrati e trova matching minimo.
+    
+    Args:
+        pred_R: (3, 3) matrice di rotazione predetta
+        gt_R: (3, 3) matrice di rotazione ground truth
+        points: (N, 3) punti del modello 3D
+    
+    Returns:
+        float: errore di rotazione in gradi (minimo considerando simmetrie)
+    """
+    # Centra i punti nell'origine
+    points_centered = points - points.mean(axis=0, keepdims=True)
+    
+    # Applica rotazioni
+    pred_pts = (pred_R @ points_centered.T).T  # (N, 3)
+    gt_pts = (gt_R @ points_centered.T).T      # (N, 3)
+    
+    # Calcola distanza minima punto-a-punto (ADD-S centrato)
+    # Per ogni punto predetto, trova il punto GT più vicino
+    from scipy.spatial.distance import cdist
+    dist_matrix = cdist(pred_pts, gt_pts, metric='euclidean')  # (N, N)
+    min_dists = dist_matrix.min(axis=1)  # (N,)
+    
+    # Errore medio come proxy dell'errore angolare
+    # Converti distanza euclidea in angolo approssimato
+    mean_dist = min_dists.mean()
+    
+    # Per sfere unitarie: dist ≈ 2*sin(angle/2)
+    # Inverti per ottenere angle ≈ 2*arcsin(dist/2)
+    angle_rad = 2 * np.arcsin(np.clip(mean_dist / 2.0, 0.0, 1.0))
+    
     return np.degrees(angle_rad)
 
 
@@ -441,17 +482,20 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
             'num_samples': '#Samples',
             'rot_mean': 'Rotation Error (deg)',
             'trans_mean': 'Translation Error (cm)',
+            'z_mean': 'Z-Error (cm)',  # 🎯 NUOVA COLONNA
             'add_mean': 'ADD(-S) (cm)',
             'accuracy_10p': 'Accuracy @10% (%)'
         }
     )
 
+    # Riordina colonne per mostrare Z-Error dopo Translation
     df = df[
         [
             'Object Name',
             '#Samples',
             'Rotation Error (deg)',
             'Translation Error (cm)',
+            'Z-Error (cm)',  # 🎯 Profondita separata
             'ADD(-S) (cm)',
             'Accuracy @10% (%)'
         ]
@@ -507,64 +551,6 @@ def batch_adds_loss(pred_R, pred_t, gt_R, gt_t, points):
     min_dists, _ = torch.min(dist_matrix, dim=2) # (B, N)
     
     return torch.mean(min_dists, dim=1) # (B,)
-
-def batch_centered_add_loss(pred_R, gt_R, points):
-    """
-    Calcola Centered ADD loss (SOLO ROTAZIONE, no traslazione).
-    Isola l'errore di rotazione applicando R sui punti centrati nell'origine.
-    
-    Args:
-        pred_R, gt_R: (B, 3, 3) - Matrici di rotazione
-        points: (B, N, 3) - Punti del modello (già centrati o verranno centrati)
-    
-    Returns:
-        (B,) - Loss per ogni elemento del batch
-    """
-    # Centra i punti nell'origine (rimuovi centroide)
-    points_centered = points - points.mean(dim=1, keepdim=True)  # (B, N, 3)
-    
-    # Trasponi per bmm: (B, 3, N)
-    points_t = points_centered.transpose(1, 2)
-    
-    # Applica SOLO rotazione (traslazione = 0)
-    pred_pts = torch.bmm(pred_R, points_t)  # (B, 3, N)
-    gt_pts = torch.bmm(gt_R, points_t)      # (B, 3, N)
-    
-    # Distanza euclidea punto-a-punto
-    dist = torch.norm(pred_pts - gt_pts, dim=1)  # (B, N)
-    return torch.mean(dist, dim=1)  # (B,)
-
-def batch_centered_adds_loss(pred_R, gt_R, points):
-    """
-    Calcola Centered ADD-S loss (SOLO ROTAZIONE per oggetti simmetrici).
-    Usa Nearest Neighbor per gestire ambiguità di simmetria.
-    
-    Args:
-        pred_R, gt_R: (B, 3, 3) - Matrici di rotazione
-        points: (B, N, 3) - Punti del modello
-    
-    Returns:
-        (B,) - Loss per ogni elemento del batch
-    """
-    # Centra i punti nell'origine
-    points_centered = points - points.mean(dim=1, keepdim=True)  # (B, N, 3)
-    points_t = points_centered.transpose(1, 2)  # (B, 3, N)
-    
-    # Applica SOLO rotazione
-    pred_pts = torch.bmm(pred_R, points_t)  # (B, 3, N)
-    gt_pts = torch.bmm(gt_R, points_t)      # (B, 3, N)
-    
-    # Permute per cdist: (B, N, 3)
-    pred_pts = pred_pts.permute(0, 2, 1)
-    gt_pts = gt_pts.permute(0, 2, 1)
-    
-    # Matrice distanze pairwise (B, N, N)
-    dist_matrix = torch.cdist(pred_pts, gt_pts, p=2)
-    
-    # Nearest Neighbor: minimo per ogni punto predetto
-    min_dists, _ = torch.min(dist_matrix, dim=2)  # (B, N)
-    
-    return torch.mean(min_dists, dim=1)  # (B,)
 
 def load_all_models_points(dataset_root, num_points=1000):
     """

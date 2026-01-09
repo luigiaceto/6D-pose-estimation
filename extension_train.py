@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 from models.TridentNetPose import TridentNetPose
 from models.ExtensionLoss import ExtensionLoss
-from utils.pose_utils import load_all_models_points, solve_translation_geometric, solve_translation_geometric_high_precision
+from utils.pose_utils import load_all_models_points, solve_translation_geometric_high_precision
 
 
 def train_one_epoch(

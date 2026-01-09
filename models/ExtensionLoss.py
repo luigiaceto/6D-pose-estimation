@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from utils.pose_utils import (
-    batch_centered_add_loss,
-    batch_centered_adds_loss,
+    compute_add_rotation_only,
+    compute_add_s_rotation_only,
     quaternion_to_rotation_matrix,
     compute_batch_rotation_error_all,
     SYMMETRIC_OBJECTS
@@ -110,14 +110,14 @@ class ExtensionLoss(nn.Module):
         for i, cid in enumerate(class_ids):
             if self.symmetry_lookup[cid.long()]:
                 # Symmetric: use Nearest Neighbor matching
-                l = batch_centered_adds_loss(
+                l = compute_add_s_rotation_only(
                     pred_R[i:i+1], 
                     gt_R[i:i+1], 
                     batch_points[i:i+1]
                 )
             else:
                 # Asymmetric: point-to-point matching
-                l = batch_centered_add_loss(
+                l = compute_add_rotation_only(
                     pred_R[i:i+1], 
                     gt_R[i:i+1], 
                     batch_points[i:i+1]
