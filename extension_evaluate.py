@@ -63,8 +63,8 @@ def evaluate_extension_batch(
             gt_rot_matrix = batch['rotation'].to(device)   # (B, 3, 3)
             obj_ids = batch['obj_id'].to(device)           # (B,)
 
-            # Forward - Modello restituisce (pred_quat, pred_trans) con back-projection interna
-            pred_quat, pred_trans = model(
+            # Forward - Modello restituisce (pred_quat, pred_trans, pred_uv)
+            pred_quat, pred_trans, _ = model(
                 rgb, 
                 depth, 
                 bbox_center, 

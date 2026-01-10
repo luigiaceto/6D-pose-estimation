@@ -51,20 +51,21 @@ def train_one_epoch(
         
         with torch.amp.autocast(device_type='cuda', enabled=True):
             # Forward (z_geometric calcolato internamente dal modello)
-            pred_quat, pred_trans = model(
+            pred_quat, pred_trans, pred_uv = model(
                 cropped_img, 
                 cropped_depth, 
                 bbox_center, 
                 bbox_dims
             )
             
-            # Calcola loss geometrica 3D + 2D
+            # Calcola loss geometrica 3D + 2D (con pred_uv disaccoppiato)
             loss_dict = criterion(
                 pred_quat=pred_quat, 
                 pred_trans=pred_trans,
                 gt_quat=gt_quaternion, 
                 gt_trans=gt_translation, 
-                class_ids=obj_id
+                class_ids=obj_id,
+                pred_uv=pred_uv
             )
 
             loss = loss_dict['total_loss']
@@ -126,20 +127,21 @@ def validate(
 
             with torch.amp.autocast(device_type='cuda', enabled=True):
                 # Forward (z_geometric calcolato internamente dal modello)
-                pred_quat, pred_trans = model(
+                pred_quat, pred_trans, pred_uv = model(
                     cropped_img, 
                     cropped_depth, 
                     bbox_center, 
                     bbox_dims
                 )
                 
-                # Calcola loss geometrica 3D + 2D
+                # Calcola loss geometrica 3D + 2D (con pred_uv disaccoppiato)
                 loss_dict = criterion(
                     pred_quat=pred_quat, 
                     pred_trans=pred_trans,
                     gt_quat=gt_quaternion, 
                     gt_trans=gt_translation, 
-                    class_ids=obj_id
+                    class_ids=obj_id,
+                    pred_uv=pred_uv
                 )
             
             # logging (loss geometriche 3D + 2D)
