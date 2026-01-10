@@ -147,15 +147,9 @@ class TridentNetPose(nn.Module):
         
         # ** Depth Z - RESIDUAL DELTA + GEOMETRIC INJECTION **
         # Se z_geometric è fornito, lo concateniamo alle features
-        if z_geometric is not None:
-            # Normalizza z_geometric (dividendo per 2.0 come fattore di scala grezzo)
-            z_norm = z_geometric / 2.0  # (B, 1)
-            fused_z = torch.cat([fused, z_norm], dim=1)  # (B, 1025)
-        else:
-            # Fallback: se z_geometric non è fornito, aggiungi uno zero
-            z_dummy = torch.zeros(fused.size(0), 1, device=fused.device)
-            fused_z = torch.cat([fused, z_dummy], dim=1)  # (B, 1025)
-        
+        z_norm = z_geometric / 2.0  # (B, 1)
+        fused_z = torch.cat([fused, z_norm], dim=1)  # (B, 1025)
+    
         # La rete predice solo un DELTA (correzione), non un valore assoluto
         # Delta_Z sarà combinato con Z_geometric nella loss
         delta_z = self.z_head(fused_z)  # (B, 1) - delta in metri (può essere +/-)

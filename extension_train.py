@@ -17,6 +17,17 @@ def train_one_epoch(
         device,
     ):
 
+    model.eval() 
+    
+    # 2. Sblocca le parti che devono imparare (Training Mode)
+    #    - fusion_fc, z_head, offset_head, rot_head: Hanno Dropout -> Serve .train()
+    #    - depth_backbone: Ha BatchNorm nuove -> Serve .train() per calcolare le statistiche!
+    model.fusion_fc.train()
+    model.z_head.train()
+    model.offset_head.train()
+    model.rot_head.train() 
+    model.depth_backbone.train()  
+
     # Inizializzazione Accumulatori (solo loss geometriche)
     total_loss_sum = 0
     rot_loss_sum = 0          # Centered ADD/ADD-S
@@ -42,21 +53,27 @@ def train_one_epoch(
             # SCALING DEPTH: CNN vuole valori piccoli (mm -> m se necessario)
             net_input_depth = cropped_depth / 1000.0
             
-            # 1. Forward 
-            pred_quat, pred_delta_z, pred_2d = model(cropped_img, net_input_depth, bbox_center, bbox_dims)
+            # Setup camera intrinsics batch
+            cam_k_batch = criterion.cam_k.repeat(len(obj_id), 1)
             
-            cam_k_batch = criterion.cam_k.repeat(len(pred_quat), 1)
-            
-            # Prendiamo solo la Z (indice 2)
-            trans_geometric = compute_translation_from_depth_crop(
+            # 1. PRE-CALCOLO Z GEOMETRIC PRIOR (usa bbox center come stima iniziale)
+            z_prior_geom = compute_translation_from_depth_crop(
                 cropped_depth=cropped_depth,      # Depth RAW (non scalata)
-                pred_uv=pred_2d,                   # Coordinate 2D predette
+                pred_uv=bbox_center,              # USA BBOX CENTER come prior
                 cam_k=cam_k_batch,
                 bbox_center=bbox_center,
                 bbox_dims=bbox_dims,
             )
+            z_geometric = z_prior_geom[:, 2:3]  # (B, 1)
             
-            z_geometric = trans_geometric[:, 2:3]  # (B, 1)
+            # 2. Forward CON Z GEOMETRIC INJECTION
+            pred_quat, pred_delta_z, pred_2d = model(
+                cropped_img, 
+                net_input_depth, 
+                bbox_center, 
+                bbox_dims, 
+                z_geometric=z_geometric  # FIX: passa il prior alla rete
+            )
             
             # 3. Calcola loss con z_geometric + delta_z
             loss_dict = criterion(
@@ -127,26 +144,30 @@ def validate(
             bbox_dims = batch['bbox_dims'].to(device, non_blocking=True)
 
             with torch.amp.autocast(device_type='cuda', enabled=True):
-                # SCALING DEPTH: CNN vuole valori piccoli (mm -> m se necessario)
                 net_input_depth = cropped_depth.clone()
-                if net_input_depth.mean() > 10.0:
-                    net_input_depth = net_input_depth / 1000.0
+                net_input_depth = net_input_depth / 1000.0
                 
-                # 1. Forward della rete (restituisce delta_z)
-                pred_quat, pred_delta_z, pred_uv = model(cropped_img, net_input_depth, bbox_center, bbox_dims)
+                # Setup camera intrinsics batch
+                cam_k_batch = criterion.cam_k.repeat(len(obj_id), 1)
                 
-                # 2. CALCOLA Z GEOMETRICA per validation
-                cam_k_batch = criterion.cam_k.repeat(len(pred_quat), 1)
-                
-                trans_geometric = compute_translation_from_depth_crop(
-                    cropped_depth=cropped_depth, 
-                    pred_uv=pred_uv, 
-                    cam_k=cam_k_batch, 
-                    bbox_center=bbox_center, 
+                # 1. PRE-CALCOLO Z GEOMETRIC PRIOR (usa bbox center come stima iniziale)
+                z_prior_geom = compute_translation_from_depth_crop(
+                    cropped_depth=cropped_depth,      # Depth RAW (non scalata)
+                    pred_uv=bbox_center,              # USA BBOX CENTER come prior
+                    cam_k=cam_k_batch,
+                    bbox_center=bbox_center,
                     bbox_dims=bbox_dims,
                 )
+                z_geometric = z_prior_geom[:, 2:3]  # (B, 1)
                 
-                z_geometric = trans_geometric[:, 2:3]  # (B, 1)
+                # 2. Forward CON Z GEOMETRIC INJECTION
+                pred_quat, pred_delta_z, pred_uv = model(
+                    cropped_img, 
+                    net_input_depth, 
+                    bbox_center, 
+                    bbox_dims, 
+                    z_geometric=z_geometric  # FIX: passa il prior alla rete
+                )
                 
                 # 3. Calcola loss
                 loss_dict = criterion(

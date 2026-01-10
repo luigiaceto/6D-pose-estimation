@@ -48,78 +48,61 @@ def yolo_to_xyxy(yolo_box, img_width, img_height):
 
 def compute_translation_from_depth_crop(cropped_depth, pred_uv, cam_k, bbox_center, bbox_dims):
     """
-    Versione ROBUSTA + CENTER MODE.
-    use_bbox_center_only: Se True, ignora l'offset predetto dalla rete e assume che 
-                          il centro dell'oggetto sia il centro geometrico del BBox.
+    Calcola la coordinata Z (depth) usando una ROBUST MEDIAN vettorizzata.
     """
     B, _, H, W = cropped_depth.shape 
     
-    # 1. Calcolo Scala (Zoom Factor)
-    w_px = bbox_dims[:, 0] * IMG_WIDTH
-    h_px = bbox_dims[:, 1] * IMG_HEIGHT
-    max_dim = torch.max(w_px, h_px)
-    scale_factor = W / torch.clamp(max_dim, min=1.0)
+    # --- Gestione Unità di misura ---
+    depth_m = cropped_depth.clone().detach()
     
- 
-    delta_uv_global = pred_uv - bbox_center 
-    delta_uv_crop = delta_uv_global * scale_factor.unsqueeze(1)
-    u_local = delta_uv_crop[:, 0] + (W / 2)
-    v_local = delta_uv_crop[:, 1] + (H / 2)
-    pred_uv_final = pred_uv
+    # Controllo euristico sul batch (se mediana > 10.0, assumiamo mm -> m)
+    if depth_m.numel() > 0 and depth_m.median() > 10.0:
+        depth_m /= 1000.0
+        
+    # --- Sampling Centrale ---
+    # Kernel size adattivo: 15% della larghezza
+    k_size = int(W * 0.15) | 1 
+    center_start = (W // 2) - (k_size // 2)
+    center_end = center_start + k_size
+    
+    # (B, k_size*k_size)
+    flat_patch = depth_m[:, 0, center_start:center_end, center_start:center_end].reshape(B, -1)
+    
+    # --- Filtro Background e Outlier (Vettorizzato) ---
+    # Creiamo una maschera dei valori validi
+    valid_mask = (flat_patch > 0.05) & (flat_patch < 4.0)
+    
+    # Copiamo la patch per inserire i NaN dove i valori non sono validi
+    patch_with_nans = flat_patch.clone()
+    patch_with_nans[~valid_mask] = float('nan')
+    
+    # --- Calcolo Mediana (ignora i NaN) ---
+    # torch.nanmedian restituisce (values, indices). A noi servono i values.
+    # Se una riga è tutta NaN, restituisce NaN.
+    z_finals = torch.nanmedian(patch_with_nans, dim=1).values
+    
+    # --- Fallback per righe completamente invalide ---
+    # Se z_finals contiene NaN, significa che per quel sample non c'erano valori validi nel centro
+    invalid_mask = torch.isnan(z_finals)
+    
+    if invalid_mask.any():
+        # Fallback semplice: valore sicuro (0.5m)
+        # Nota: Qui potresti implementare la ricerca sull'intero crop se volessi, 
+        # ma vettorizzarla è complesso. Il fallback statico è solitamente sufficiente.
+        z_finals[invalid_mask] = 0.5 
 
-    # 2. Campionamento Adattivo (Kernel 5x5)
-    # Kernel ridotto per evitare di pescare lo sfondo su oggetti sottili
-    k_size = 5 
-    pad = k_size // 2
+    z_final = z_finals.unsqueeze(1) # (B, 1)
+
+    # --- Back-Projection ---
+    fx, fy = cam_k[:, 0], cam_k[:, 1]
+    cx, cy = cam_k[:, 2], cam_k[:, 3]
     
-    u_center = torch.clamp(u_local.long(), pad, W - 1 - pad)
-    v_center = torch.clamp(v_local.long(), pad, H - 1 - pad)
+    tx = (pred_uv[:, 0] - cx) * z_final / fx
+    ty = (pred_uv[:, 1] - cy) * z_final / fy
     
-    # Creazione griglia di campionamento vettorizzata
-    grid_y, grid_x = torch.meshgrid(
-        torch.arange(-pad, pad + 1, device=cropped_depth.device),
-        torch.arange(-pad, pad + 1, device=cropped_depth.device),
-        indexing='ij'
-    )
-    off_x = grid_x.flatten()
-    off_y = grid_y.flatten()
-    
-    sample_u = torch.clamp(u_center.unsqueeze(1) + off_x.unsqueeze(0), 0, W - 1)
-    sample_v = torch.clamp(v_center.unsqueeze(1) + off_y.unsqueeze(0), 0, H - 1)
-    
-    flat_indices = (sample_v * W + sample_u).long()
-    z_patches = torch.gather(cropped_depth.view(B, -1), 1, flat_indices)
-    
-    # 3. Filtraggio Robusto con Intelligent Fallback
-    sorted_z, _ = torch.sort(z_patches, dim=1)
-    z_geom = sorted_z[:, z_patches.shape[1] // 2]  # Mediana
-    
-    # Unità mm -> m (se necessario)
-    z_geom = torch.where(z_geom > 100.0, z_geom / 1000.0, z_geom)
-    
-    # Filtro di validità: accetta solo depth nel range realistico [0.1m, 3.0m]
-    valid_mask = (z_geom > 0.1) & (z_geom < 3.0)
-    
-    # INTELLIGENT FALLBACK: Usa la media dei valori validi nel batch corrente
-    if valid_mask.any():
-        # Calcola media solo sui campioni validi
-        batch_mean = z_geom[valid_mask].mean()
-        z_fallback = batch_mean
-    else:
-        # Se nessun valore valido, usa stima conservativa
-        z_fallback = torch.tensor(0.5, device=z_geom.device, dtype=z_geom.dtype)
-    
-    # Sostituisci valori invalidi con il fallback intelligente
-    z_final = torch.where(valid_mask, z_geom, z_fallback)
-    z_final = torch.clamp(z_final, min=0.1, max=3.0)  # Safety clamp finale nel range valido
-    
-    # 4. Back-Projection (Pinhole)
-    fx, fy, cx, cy = cam_k[:, 0], cam_k[:, 1], cam_k[:, 2], cam_k[:, 3]
-    
-    tx = (pred_uv_final[:, 0] - cx) * z_final / fx
-    ty = (pred_uv_final[:, 1] - cy) * z_final / fy
-    
-    return torch.stack([tx, ty, z_final], dim=1)
+    return torch.stack([tx, ty, z_final.squeeze(1)], dim=1)
+
+
 
 def quaternion_to_rotation_matrix(quaternion):
     """
