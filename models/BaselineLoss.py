@@ -52,12 +52,12 @@ class BaselineLoss(nn.Module):
             dict con total_loss, metriche
         """
         
-        batch_points = self.model_points_bank[class_ids.long().cpu()]  # (B, N, 3)
+        batch_points = self.model_points_bank[class_ids.long().cpu() ]  # (B, N, 3)
         pred_R = quaternion_to_rotation_matrix(pred_quat)  # (B, 3, 3)
         gt_R = quaternion_to_rotation_matrix(gt_quat)      # (B, 3, 3)
             
         # symmetry mask
-        is_symmetric = self.symmetry_lookup[class_ids.long()]  # (B,)
+        is_symmetric = self.symmetry_lookup[class_ids.long().cpu() ]  # (B,)
             
         loss_add = compute_ADD(pred_R, gt_R, batch_points)    # (B,) asymmetric
         loss_adds = compute_ADDS(pred_R, gt_R, batch_points)  # (B,) symmetric
@@ -70,8 +70,11 @@ class BaselineLoss(nn.Module):
             trans_error_m = torch.mean(torch.norm(pred_trans - gt_trans, dim=1))
             trans_error_cm = trans_error_m * 100  # metri -> cm
             rot_err_deg = compute_rotation_error(
-                pred_quat, gt_quat, class_ids, 
-                self.symmetry_lookup, self.model_points_bank
+                pred_quat, 
+                gt_quat, 
+                class_ids.cpu(), 
+                self.symmetry_lookup, 
+                self.model_points_bank
             )
         
         return {
