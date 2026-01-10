@@ -15,6 +15,10 @@ class RGBDDatasetPose(CustomDatasetPose):
         
         IMPORTANTE: Usa letterbox padding (come RGB) per preservare aspect ratio dell'oggetto.
         Resize con NEAREST per preservare valori di profondità esatti.
+        
+        Returns:
+            depth_tensor: (1, H, W) in metri
+            scale_factor: float, fattore di scaling applicato (per correggere GT translation)
         """
         # path della depth image 'dataset_root/data/01/depth/0000.png'
         depth_path = self.dataset_root / "data" / f"{folder_id:02d}" / "depth" / f"{sample_id:04d}.png"
@@ -29,6 +33,8 @@ class RGBDDatasetPose(CustomDatasetPose):
         depth_tensor = torch.tensor(np.array(square_depth), dtype=torch.float32)
         depth_tensor = depth_tensor / 1000.0 # Converti mm -> metri
 
+        scale_factor = 1.0  # Default: no scaling
+        
         # in training applico data augmentation alla depth
         if self.split == 'train':
             # Simula errori di calibrazione minimi e previene overfitting sui valori esatti
@@ -41,13 +47,13 @@ class RGBDDatasetPose(CustomDatasetPose):
             noise = torch.randn_like(depth_tensor) * 0.003  # +/- 3mm di rumore
             depth_tensor[valid_mask] += noise[valid_mask]   # Somma solo sui pixel validi
             
-            # Poi applica dropout (3% dei pixel persi)
+            # Bug #4 Fix: Converti maschera bool a float esplicitamente
             dropout_mask = torch.rand_like(depth_tensor) > 0.03
-            depth_tensor = depth_tensor * dropout_mask
+            depth_tensor = depth_tensor * dropout_mask.float()
 
         depth_tensor = depth_tensor.unsqueeze(0) # Aggiungi canale: (1, 224, 224)
         
-        return depth_tensor
+        return depth_tensor, scale_factor
 
     def __getitem__(self, idx):
         folder_id, sample_id = self.samples[idx]
@@ -64,7 +70,13 @@ class RGBDDatasetPose(CustomDatasetPose):
         cropped_img = self._crop_and_pad_image(img, bbox_jittered)
         cropped_img = self.transform_crop(cropped_img)
         
-        cropped_depth = self.load_cropped_depth(folder_id, sample_id, bbox_jittered)
+        # Bug #1 Fix: Ricevi scale_factor e applicalo alla GT translation Z
+        cropped_depth, depth_scale = self.load_cropped_depth(folder_id, sample_id, bbox_jittered)
+        
+        # CRITICAL: Applica depth scaling alla coordinata Z del GT
+        # (altrimenti c'è data leakage: input scalato, label non scalata)
+        translation_corrected = translation.copy()
+        translation_corrected[2] *= depth_scale  # Scale Z coordinate
         
         # centro del bbox jitterato (verrà regredito al centro reale dell'oggetto
         # grazie all'utilizzo di δu e δv predetti dalla rete).
@@ -91,7 +103,7 @@ class RGBDDatasetPose(CustomDatasetPose):
 
             # label/ground truth
             "obj_id": torch.tensor(obj_id),
-            "translation": torch.tensor(translation),
+            "translation": torch.tensor(translation_corrected),  # Bug #1 Fix: Usa translation corretta
             "rotation": torch.tensor(rotation),
             "quaternion": torch.tensor(quaternion)
         }

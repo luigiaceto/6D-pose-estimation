@@ -26,12 +26,7 @@ def train_one_epoch(
     model.z_head.train()
     model.offset_head.train()
     model.rot_head.train() 
-    model.depth_backbone.train()
-    
-    # Bug #3 Fix: Se RGB backbone è stata sbloccata, mettila in train() mode
-    # (altrimenti BatchNorm usa statistiche ImageNet invece di aggiornarsi su LineMOD)
-    if model.rgb_backbone[0].weight.requires_grad:
-        model.rgb_backbone.train()  
+    model.depth_backbone.train() 
 
     # Inizializzazione Accumulatori (solo loss geometriche)
     total_loss_sum = 0

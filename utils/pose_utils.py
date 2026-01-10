@@ -52,17 +52,16 @@ def compute_translation_from_depth_crop(cropped_depth, pred_uv, cam_k):
     
     Bug #2 Fix: Invece di campionare solo il centro fisso (che fallisce con jitter),
     usa il 10° percentile dell'intero crop valido (assume l'oggetto sia la cosa più vicina).
+    
+    IMPORTANTE: Assume che cropped_depth sia GIÀ IN METRI (garantito dal dataset).
     """
     B, _, H, W = cropped_depth.shape 
     
-    # --- 1. Gestione Unità di misura ---
+    # --- 1. Nessuna conversione unità - Dataset garantisce metri ---
+    # Bug #3 Fix: Rimossa euristica fragile (if median > 10 -> divide)
+    # Il dataset DEVE fornire depth in metri, altrimenti correggi il dataset.
     depth_m = cropped_depth.clone().detach()
     
-    # Euristica batch-wise: se la mediana globale è alta, converti tutto
-    valid_vals = depth_m[depth_m > 0]
-    if valid_vals.numel() > 0 and valid_vals.median() > 10.0:
-        depth_m /= 1000.
-        
     # --- 2. Sampling Robusto su TUTTO il Crop (non solo centro) ---
     # Bug #2 Fix: Con il jitter del bbox, l'oggetto può essere decentrato.
     # Soluzione: Prendi il PERCENTILE dei valori più vicini (assume oggetto > background)
