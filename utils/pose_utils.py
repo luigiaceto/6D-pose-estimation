@@ -216,7 +216,9 @@ def compute_rotation_error(pred_quat, gt_quat, class_ids, symmetry_lookup, model
     with torch.no_grad():
         B = pred_quat.shape[0]
         device = pred_quat.device
-        is_sym = symmetry_lookup[class_ids.long()] # (B,)
+        
+        # Indicizzazione su CPU, poi sposta su GPU
+        is_sym = symmetry_lookup[class_ids.cpu().long()].to(device)  # (B,)
         errors = torch.zeros(B, device=device)
         
         # --- 1. OGGETTI ASIMMETRICI (Metodo Quaternioni) ---
@@ -235,7 +237,8 @@ def compute_rotation_error(pred_quat, gt_quat, class_ids, symmetry_lookup, model
         if is_sym.any():
             p_R = quaternion_to_rotation_matrix(pred_quat[is_sym])
             g_R = quaternion_to_rotation_matrix(gt_quat[is_sym])
-            pts = model_points[class_ids[is_sym].long()] # (K, N, 3)
+            # Indicizzazione su CPU per model_points, poi sposta su GPU
+            pts = model_points[class_ids[is_sym].cpu().long()].to(device)  # (K, N, 3)
             
             # Calcola raggio medio per ogni oggetto nel batch
             radii = torch.norm(pts, dim=2).mean(dim=1).view(-1, 1, 1) # (K, 1, 1)
