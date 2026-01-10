@@ -101,13 +101,14 @@ def compute_translation_from_depth_crop(cropped_depth, pred_uv, cam_k):
     z_final = z_finals.unsqueeze(1) # (B, 1)
 
     # --- 6. Back-Projection ---
-    fx, fy = cam_k[:, 0], cam_k[:, 1]
-    cx, cy = cam_k[:, 2], cam_k[:, 3]
+    # Mantieni dimensionalità (B, 1) per corretto broadcasting
+    fx, fy = cam_k[:, 0:1], cam_k[:, 1:2]
+    cx, cy = cam_k[:, 2:3], cam_k[:, 3:4]
     
-    tx = (pred_uv[:, 0] - cx) * z_final / fx
-    ty = (pred_uv[:, 1] - cy) * z_final / fy
+    tx = (pred_uv[:, 0:1] - cx) * z_final / fx
+    ty = (pred_uv[:, 1:2] - cy) * z_final / fy
     
-    return torch.stack([tx, ty, z_final.squeeze(1)], dim=1)
+    return torch.cat([tx, ty, z_final], dim=1)
 
 
 
