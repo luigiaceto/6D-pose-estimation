@@ -135,7 +135,7 @@ class ExtensionLoss(nn.Module):
         # METRICS FOR LOGGING
         with torch.no_grad():
             trans_err_cm = torch.norm(pred_trans - gt_trans, p=2, dim=1).mean() * 100
-            proj_err_px = torch.norm(pred_2d - gt_2d_target, p=2, dim=1).mean()
+            proj_err_px = torch.norm(pred_2d - gt_2d, p=2, dim=1).mean()
             # Rotation error (handles symmetric/asymmetric automatically)
             rot_err_deg = compute_rotation_error(
                 pred_quat, gt_quat, class_ids, 

@@ -50,12 +50,10 @@ def train_one_epoch(
         optimizer.zero_grad(set_to_none=True)
         
         with torch.amp.autocast(device_type='cuda', enabled=True):
-            net_input_depth = cropped_depth.clone()
-            
             # Forward (z_geometric calcolato internamente dal modello)
             pred_quat, pred_trans = model(
                 cropped_img, 
-                net_input_depth, 
+                cropped_depth, 
                 bbox_center, 
                 bbox_dims
             )
@@ -127,12 +125,10 @@ def validate(
             bbox_dims = batch['bbox_dims'].to(device, non_blocking=True)
 
             with torch.amp.autocast(device_type='cuda', enabled=True):
-                net_input_depth = cropped_depth.clone()
-                
                 # Forward (z_geometric calcolato internamente dal modello)
                 pred_quat, pred_trans = model(
                     cropped_img, 
-                    net_input_depth, 
+                    cropped_depth, 
                     bbox_center, 
                     bbox_dims
                 )

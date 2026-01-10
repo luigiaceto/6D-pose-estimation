@@ -54,7 +54,6 @@ def train(
     mesh_points_cache = load_models_points(dataset_root, num_points=num_points)
     for k, v in mesh_points_cache.items():
         mesh_points_cache[k] = v.to(device)
-    print(f"Loaded {len(mesh_points_cache)} objects with {num_points} points each")
     
     # Symmetry lookup
     symmetry_lookup = torch.zeros(max_obj_id + 1, dtype=torch.bool, device=device)

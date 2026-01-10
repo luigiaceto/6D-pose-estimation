@@ -5,14 +5,13 @@ from tqdm import tqdm
 from collections import defaultdict
 
 from models.TridentNetPose import TridentNetPose
-from models.PinholeCamera import PinholeCamera
 from utils.pose_utils import (
     quaternion_to_rotation_matrix,  
     load_models_points, 
     print_evaluation_results_table,
     compute_rotation_error,
-    batch_compute_add_metric,
-    batch_compute_add_s_metric,
+    compute_ADD,
+    compute_ADDS,
     compute_translation_error,
     SYMMETRIC_OBJECTS,
     N_POINTS_TO_LOAD
@@ -39,7 +38,6 @@ def evaluate_extension_batch(
     num_points = N_POINTS_TO_LOAD
     print("Preloading mesh points for batch evaluation...")
     mesh_points_cache = load_models_points(dataset_root, num_points=num_points)
-    print(f"Loaded {len(mesh_points_cache)} objects with {num_points} surface points each")
     
     # Spostiamo tutti i punti sulla GPU subito per velocità
     for k, v in mesh_points_cache.items():
@@ -65,13 +63,10 @@ def evaluate_extension_batch(
             gt_rot_matrix = batch['rotation'].to(device)   # (B, 3, 3)
             obj_ids = batch['obj_id'].to(device)           # (B,)
 
-            # SCALING DEPTH: CNN vuole valori piccoli (mm -> m se necessario)
-            net_input_depth = depth / 1000.0
-
             # Forward - Modello restituisce (pred_quat, pred_trans) con back-projection interna
             pred_quat, pred_trans = model(
                 rgb, 
-                net_input_depth, 
+                depth, 
                 bbox_center, 
                 bbox_dims
             )
@@ -88,10 +83,10 @@ def evaluate_extension_batch(
             gt_t_b = gt_trans.unsqueeze(-1)
             
             # Calcola ADD (Asimmetrico)
-            add_losses = batch_compute_add_metric(pred_rot_matrix, pred_t_b, gt_rot_matrix, gt_t_b, batch_points)
+            add_losses = compute_ADD(pred_rot_matrix, gt_rot_matrix, batch_points, pred_t_b, gt_t_b)
             
             # Calcola ADD-S (Simmetrico)
-            adds_losses = batch_compute_add_s_metric(pred_rot_matrix, pred_t_b, gt_rot_matrix, gt_t_b, batch_points)
+            adds_losses = compute_ADDS(pred_rot_matrix, gt_rot_matrix, batch_points, pred_t_b, gt_t_b)
             
             # Portiamo tutto su CPU per logging e calcoli finali leggeri
             add_res = (add_losses).cpu().numpy()

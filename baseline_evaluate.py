@@ -42,7 +42,6 @@ def evaluate_baseline(
     num_points = N_POINTS_TO_LOAD
     print(f" Preloading HIGH RES models ({num_points} points per object)...")
     model_points_dict = load_models_points(dataset_root, num_points=num_points)
-    print(f" Loaded {len(model_points_dict)} objects with {num_points} surface points each")
 
     max_id = max(model_points_dict.keys())
     n_pts = list(model_points_dict.values())[0].shape[0]
@@ -100,8 +99,8 @@ def evaluate_baseline(
             gt_t_batch = gt_trans.unsqueeze(-1)
             
             # --- METRICA ADD(-S) ---
-            add_batch = compute_ADD(pred_rotation_matrix, pred_t_batch, gt_rot_matrix, gt_t_batch, batch_points)
-            adds_batch = compute_ADDS(pred_rotation_matrix, pred_t_batch, gt_rot_matrix, gt_t_batch, batch_points)
+            add_batch = compute_ADD(pred_rotation_matrix, gt_rot_matrix, batch_points, pred_t_batch, gt_t_batch)
+            adds_batch = compute_ADDS(pred_rotation_matrix, gt_rot_matrix, batch_points, pred_t_batch, gt_t_batch)
             is_symmetric = symmetry_lookup[obj_ids]
             final_add = torch.where(is_symmetric, adds_batch, add_batch)
             

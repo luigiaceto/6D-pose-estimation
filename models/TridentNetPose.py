@@ -20,9 +20,8 @@ class DepthEncoder(nn.Module):
             nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3),               # -> 112x112
             nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),                   # -> 56x56
             
-            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),             # -> 28x28
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),             # -> 56x56
             nn.BatchNorm2d(128),
             nn.ReLU(),
             

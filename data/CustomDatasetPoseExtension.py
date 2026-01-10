@@ -36,10 +36,12 @@ class RGBDDatasetPose(CustomDatasetPose):
         if self.split == 'train':
             valid_mask = depth_tensor > 0
             noise = torch.randn_like(depth_tensor) * 0.003  # +/- 3mm di rumore
-            depth_tensor[valid_mask] += noise[valid_mask]   # somma solo sui pixel validi
+            # Crea nuova copia invece di modificare in-place (evita side effects con caching)
+            noisy_depth = depth_tensor.clone()
+            noisy_depth[valid_mask] = depth_tensor[valid_mask] + noise[valid_mask]
             
-            dropout_mask = torch.rand_like(depth_tensor) > 0.03
-            depth_tensor = depth_tensor * dropout_mask.float()
+            dropout_mask = torch.rand_like(noisy_depth) > 0.03
+            depth_tensor = noisy_depth * dropout_mask.float()
 
         depth_tensor = depth_tensor.unsqueeze(0)
         
