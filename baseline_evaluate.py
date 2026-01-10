@@ -1,22 +1,16 @@
 from pathlib import Path
 import torch
-import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from collections import defaultdict
 
 from models.ResNetPose import ResNetPose
 from models.PinholeCamera import PinholeCamera
 from utils.pose_utils import (
     quaternion_to_rotation_matrix,  
-    batch_compute_add_metric, 
-    batch_compute_add_s_metric, 
-    compute_rotation_error,
-    compute_translation_error,
+    compute_ADD, 
+    compute_ADDS,
     load_models_points,
     print_evaluation_results_table,
-    compute_rotation_error,
-    compute_translation_error,
     SYMMETRIC_OBJECTS, 
     N_POINTS_TO_LOAD
 )
@@ -49,17 +43,20 @@ def evaluate_baseline(
     print(f" Preloading HIGH RES models ({num_points} points per object)...")
     model_points_dict = load_models_points(dataset_root, num_points=num_points)
     print(f" Loaded {len(model_points_dict)} objects with {num_points} surface points each")
+
+    max_id = max(model_points_dict.keys())
+    n_pts = list(model_points_dict.values())[0].shape[0]
+    point_bank = torch.zeros((max_id + 1, n_pts, 3), dtype=torch.float32)
+    for oid, pts in model_points_dict.items():
+        point_bank[oid] = pts.to(device)
+            
+    # symmetry lookup table (True for symmetric objects)
+    symmetry_lookup = torch.zeros(max_id + 1, dtype=torch.bool)
+    for obj_id in SYMMETRIC_OBJECTS:
+        if obj_id <= max_id:
+            symmetry_lookup[obj_id] = True
     
-    # Spostiamo tutti i punti sulla GPU subito per velocità
-    for k, v in model_points_dict.items():
-        model_points_dict[k] = v.to(device)
-    
-    # Accumulatori
-    all_add = []
-    all_rot_errors = []
-    all_trans_errors = []
-    all_diameters = []
-    per_class_metrics = defaultdict(list)
+    results_list = []
 
     print("Evaluating Baseline (BATCH MODE)...")
     with torch.no_grad():
@@ -67,10 +64,9 @@ def evaluate_baseline(
             # Dati su GPU
             cropped_img = batch['cropped_img'].to(device)
             bbox_base = batch['bbox_base'].to(device)
-            
-            gt_trans = batch['translation'].to(device)    # (B, 3)
-            gt_rot_matrix = batch['rotation'].to(device)  # (B, 3, 3)
-            obj_ids = batch['obj_id'].to(device)          # (B,)
+            gt_trans = batch['translation'].to(device)    
+            gt_rot_matrix = batch['rotation'].to(device) 
+            obj_ids = batch['obj_id'].to(device)          
             
             # Ricostruiamo bbox xyxy per il pinhole
             bbox_xyxy = torch.stack([
@@ -97,84 +93,94 @@ def evaluate_baseline(
             pred_quaternion = model(cropped_img)  # (B, 4)
             pred_rotation_matrix = quaternion_to_rotation_matrix(pred_quaternion)
             
-            batch_points = torch.stack([model_points_dict[int(oid)] for oid in obj_ids])
+            batch_points = point_bank[obj_ids]
             
             # Reshape per batch functions: (B, 3) -> (B, 3, 1)
             pred_t_batch = pred_trans.unsqueeze(-1)
             gt_t_batch = gt_trans.unsqueeze(-1)
             
-            add_batch = batch_compute_add_metric(pred_rotation_matrix, pred_t_batch, gt_rot_matrix, gt_t_batch, batch_points)
+            # --- METRICA ADD(-S) ---
+            add_batch = compute_ADD(pred_rotation_matrix, pred_t_batch, gt_rot_matrix, gt_t_batch, batch_points)
+            adds_batch = compute_ADDS(pred_rotation_matrix, pred_t_batch, gt_rot_matrix, gt_t_batch, batch_points)
+            is_symmetric = symmetry_lookup[obj_ids]
+            final_add = torch.where(is_symmetric, adds_batch, add_batch)
             
-            adds_batch = batch_compute_add_s_metric(pred_rotation_matrix, pred_t_batch, gt_rot_matrix, gt_t_batch, batch_points)
-            
-            # Converti su CPU per elaborazione finale
-            add_res = (add_batch * 100).cpu().numpy()  # m -> cm
-            adds_res = (adds_batch * 100).cpu().numpy()  # m -> cm
-            batch_size = len(obj_ids)
-            pred_R_np = pred_rotation_matrix.cpu().numpy()
-            pred_t_np = pred_trans.cpu().numpy()
-            gt_R_np = gt_rot_matrix.cpu().numpy()
-            gt_t_np = gt_trans.cpu().numpy()
-            batch_points_np = batch_points.cpu().numpy()
-            ids_np = obj_ids.cpu().numpy()
-            
-            # Per ogni sample nel batch (solo per logging e metriche accessorie)
-            for i in range(batch_size):
-                obj_id = int(obj_ids[i])
-                model_points = batch_points_np[i]  # (N, 3)
-                diameter = object_diameters[obj_id]
+            # --- ERRORE TRASLAZIONE ---
+            trans_errors = torch.norm(pred_trans - gt_trans, dim=1) * 100
 
-                 # Selezione Metrica Corretta (ADD vs ADD-S)
-                if obj_id in SYMMETRIC_OBJECTS:
-                    final_add = adds_res[i]
-                else:
-                    final_add = add_res[i]
+            # --- ERRORE ROTAZIONE ---
+            R_diff = torch.bmm(pred_rotation_matrix.transpose(1, 2), gt_rot_matrix)
+            trace = R_diff[:, 0, 0] + R_diff[:, 1, 1] + R_diff[:, 2, 2]
+            cos_theta = ((trace - 1) / 2.0).clamp(-1.0, 1.0)
+            rot_errors_deg = torch.rad2deg(torch.acos(cos_theta))
+            if is_symmetric.any():
+                # Raggio medio approssimato (diametro / 2)
+                radii = batch_diameters / 2.0 / 1000.0 # mm -> m
+                ratio = (adds_batch / (2 * radii)).clamp(-1.0, 1.0)
+                sym_rot_errors = torch.rad2deg(2 * torch.asin(ratio))
+                rot_errors_deg = torch.where(is_symmetric, sym_rot_errors, rot_errors_deg)
 
-                # Rotation e translation errors (rimangono singoli perché non facilmente batchabili)
-                rot_err = compute_rotation_error(pred_R_np[i], gt_R_np[i])
-                trans_err = compute_translation_error(pred_t_np[i], gt_t_np[i])
-               
-                all_rot_errors.append(rot_err)
-                all_trans_errors.append(trans_err)
-                all_diameters.append(diameter)
-                
-                per_class_metrics[obj_id].append({
-                    'rotation': rot_err,
-                    'translation': trans_err,
-                    'add': final_add
+            # Salvo su CPU
+            B = len(obj_ids)
+            ids_cpu = obj_ids.cpu().numpy()
+            add_cpu = (final_add * 100).cpu().numpy() # m -> cm
+            trans_cpu = trans_errors.cpu().numpy()
+            rot_cpu = rot_errors_deg.cpu().numpy()
+            
+            for i in range(B):
+                results_list.append({
+                    'class_id': int(ids_cpu[i]),
+                    'rotation': rot_cpu[i],
+                    'translation': trans_cpu[i],
+                    'add': add_cpu[i]
                 })
                
     
-    all_add_np = np.array(all_add)
-    all_diameters_cm = np.array(all_diameters) / 10.0 # diametri convertiti da mm a cm
-
-    # ADD Accuracy @ 10% diametro oggetti
-    thresholds = all_diameters_cm * 0.1
-    accuracy = np.mean(all_add_np < thresholds) * 100
-
+    df_raw = pd.DataFrame(results_list)
+    
+    # Calcolo statistiche per classe
     per_class_results = []
-    for cls_id, metrics in sorted(per_class_metrics.items()):
-        metrics_df = pd.DataFrame(metrics)
+    
+    # Raggruppa per class_id
+    grouped = df_raw.groupby('class_id')
+    
+    for cls_id, group in grouped:
+        # Diametro in cm
         cls_diam_cm = object_diameters[cls_id] / 10.0
-        cls_thresh = cls_diam_cm * 0.1
-        cls_acc = np.mean(metrics_df['add'] < cls_thresh) * 100
+        threshold = cls_diam_cm * 0.1
+        
+        accuracy = (group['add'] < threshold).mean() * 100
         
         per_class_results.append({
             'class_id': cls_id,
-            'num_samples': len(metrics),
-            'rot_mean': metrics_df['rotation'].mean(),
-            'trans_mean': metrics_df['translation'].mean(),
-            'add_mean': metrics_df['add'].mean(),
-            'accuracy_10p': cls_acc
+            'num_samples': len(group),
+            'rot_mean': group['rotation'].mean(),
+            'trans_mean': group['translation'].mean(),
+            'add_mean': group['add'].mean() / 100.0, # torna a metri per compatibilità con print_table
+            'accuracy_10p': accuracy
         })
-        
+
+    # Calcolo accuracy globale pesata sui singoli sample
+    # (ogni sample ha una soglia diversa in base al suo oggetto)
+    valid_samples = 0
+    correct_samples = 0
+    
+    for i, row in df_raw.iterrows():
+        cls_id = row['class_id']
+        thresh = (object_diameters[cls_id] / 10.0) * 0.1
+        if row['add'] < thresh:
+            correct_samples += 1
+        valid_samples += 1
+            
+    total_accuracy = (correct_samples / valid_samples * 100) if valid_samples > 0 else 0
+
     per_class_results.append({
         'class_id': 'MEAN',
-        'num_samples': len(all_add),
-        'rot_mean': np.mean(all_rot_errors),
-        'trans_mean': np.mean(all_trans_errors),
-        'add_mean': np.mean(all_add),
-        'accuracy_10p': accuracy
+        'num_samples': len(df_raw),
+        'rot_mean': df_raw['rotation'].mean(),
+        'trans_mean': df_raw['translation'].mean(),
+        'add_mean': df_raw['add'].mean() / 100.0, # metri
+        'accuracy_10p': total_accuracy
     })
 
     return print_evaluation_results_table(per_class_results, save_table, table_path)

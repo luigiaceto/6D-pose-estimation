@@ -9,7 +9,7 @@ from models.ResNetPose import ResNetPose
 from models.PinholeCamera import PinholeCamera
 from models.BaselineLoss import BaselineLoss
 from utils.pose_utils import (
-    compute_batch_rotation_error,
+    compute_rotation_error,
     load_models_points,
     SYMMETRIC_OBJECTS,
     N_POINTS_TO_LOAD
@@ -75,8 +75,6 @@ def train(
 
     # Loss (ora richiede model_points_dict per centered ADD/ADD-S)
     criterion = BaselineLoss(
-        lambda_rotation=1.0, 
-        lambda_translation=0.0,
         model_points_dict=mesh_points_cache
     )
 
@@ -240,7 +238,7 @@ def train(
                 val_losses.append(losses['total_loss'].item())
 
                 # Monitoraggio Errore Rotazione (come extension)
-                rot_err_deg = compute_batch_rotation_error(
+                rot_err_deg = compute_rotation_error(
                     pred_quaternion,
                     gt_quaternion,
                     obj_id,

@@ -254,10 +254,6 @@ class CustomDatasetPose(Dataset):
         x_new = center_x_new - w_new / 2
         y_new = center_y_new - h_new / 2
         
-        # Bug #6 Fix: Instead of clamping dimensions (which changes aspect ratio),
-        # shift the box to keep it within bounds while preserving size.
-        # The _crop_and_pad_image method will handle padding with black pixels.
-        
         # Se il box esce dai bordi, lo shiftiamo all'interno
         if x_new < 0:
             x_new = 0

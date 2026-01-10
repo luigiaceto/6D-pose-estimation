@@ -19,9 +19,11 @@ from models.PinholeCamera import PinholeCamera
 from utils.pose_utils import (
     quaternion_to_rotation_matrix, 
     YOLO_TO_LINEMOD_MAP,
-    compute_rotation_error,
+    compute_rotation_error,         
+    compute_translation_error,
     load_models_points,
-    N_POINTS_TO_LOAD
+    N_POINTS_TO_LOAD,
+    SYMMETRIC_OBJECTS
 )
 from utils.visualization import draw_3d_bbox_colored, draw_axis_colored 
 
@@ -47,7 +49,6 @@ def visualize_baseline_predictions(
         image_path: Path manuale dell'immagine (deprecato, usa test_dataset)
     """
     
-    # 1. Gestione Selezione Immagine dal Test Set
     if test_dataset is not None:
         test_samples = test_dataset.get_samples_id()
         
@@ -71,28 +72,35 @@ def visualize_baseline_predictions(
         print("  ATTENZIONE: image_path fornito manualmente. Impossibile verificare se è nel test set.")
         print("  Raccomandazione: usa 'test_dataset' per garantire selezione dal test set.")
     
-    # 2. Load object diameters
     models_info_path = str(dataset_root / "models" / "models_info.yml")
     with open(models_info_path, 'r') as f:
         models_info = yaml.load(f, Loader=yaml.CLoader)
     object_diameters = {obj_id: info['diameter'] for obj_id, info in models_info.items()}
     
-    # Load model points for rotation error calculation
+    # Carichiamo nuvole punti e creiamo tensori per GPU (Batch Logic)
     num_points = N_POINTS_TO_LOAD
     mesh_points_cache = load_models_points(dataset_root, num_points=num_points)
     
-    # 3. Load models
+    max_obj_id = max(mesh_points_cache.keys())
+    all_models_tensor = torch.zeros((max_obj_id + 1, num_points, 3), device=device, dtype=torch.float32)
+    for oid, points in mesh_points_cache.items():
+        all_models_tensor[oid] = points.to(device)
+        
+    # Lookup Table Simmetria
+    symmetry_lookup = torch.zeros(max_obj_id + 1, dtype=torch.bool, device=device)
+    for sym_id in SYMMETRIC_OBJECTS:
+        if sym_id <= max_obj_id:
+            symmetry_lookup[sym_id] = True
+    
     yolo_model = YOLO(yolo_checkpoint)
     
     checkpoint = torch.load(model_checkpoint, map_location=device, weights_only=False)
     pose_model = ResNetPose().to(device)
     pose_model.load_state_dict(checkpoint['model_state_dict'])
     pose_model.eval()
-    
-    # 4. Pinhole camera
+
     pinhole = PinholeCamera(cam_k=cam_k)
     
-    # 5. Image transforms
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(
@@ -101,7 +109,6 @@ def visualize_baseline_predictions(
         )
     ])
     
-    # 6. Load image
     img = cv2.imread(image_path)
     if img is None:
         raise FileNotFoundError(f"Immagine non trovata: {image_path}")
@@ -113,7 +120,6 @@ def visualize_baseline_predictions(
     obj_folder = match.group(1)
     img_name = match.group(2)
     
-    
     gt_file = image_path.replace(
         str(Path("data") / f"{obj_folder}" / "rgb" / f"{img_name}.png"),
         f'{obj_folder}_gt.yml'
@@ -122,7 +128,6 @@ def visualize_baseline_predictions(
     with open(gt_file, 'r') as f:
         gt_data = yaml.load(f, Loader=yaml.CLoader)
     
-    # 7. YOLO detection
     results = yolo_model(image_path, verbose=False)
     
     print("\n" + "="*70)
@@ -184,13 +189,16 @@ def visualize_baseline_predictions(
             diameter = object_diameters[obj_id]
             
             bbox_xyxy = torch.tensor([[x_min, y_min, x_max, y_max]], device=device, dtype=torch.float32)
-            center_2d_pixels = torch.tensor([[(x_min + x_max) / 2, (y_min + y_max) / 2]], device=device, dtype=torch.float32)
-            batch_diameters = torch.tensor([diameter], device=device, dtype=torch.float32)
+            center_2d = torch.tensor([[(x_min + x_max) / 2, (y_min + y_max) / 2]], device=device)
+            batch_diam = torch.tensor([diameter], device=device)
             
-            depth = pinhole.compute_depth_from_bbox(bbox_xyxy, batch_diameters)
-            pred_translation = pinhole.unproject_2d_to_3d(center_2d_pixels, depth)[0].cpu().numpy()
+            depth = pinhole.compute_depth_from_bbox(bbox_xyxy, batch_diam)
+            pred_trans_tensor = pinhole.unproject_2d_to_3d(center_2d, depth) # (1, 3)
+            
+            # Convert to Numpy for Drawing
+            pred_translation = pred_trans_tensor[0].cpu().numpy()
             pred_rotation = quaternion_to_rotation_matrix(pred_quaternion)[0].cpu().numpy()
-            pred_quat = pred_quaternion[0].cpu().numpy()
+            pred_quat_np = pred_quaternion[0].cpu().numpy()
             
             # Estrazione ground truth per questa immagine
             img_idx = int(img_name)
@@ -216,7 +224,7 @@ def visualize_baseline_predictions(
                 
                 print(f"\n PREDICTION:")
                 print(f"     Translation: [{pred_translation[0]:7.4f}, {pred_translation[1]:7.4f}, {pred_translation[2]:7.4f}] m")
-                print(f"     Quaternion:  [{pred_quat[0]:7.4f}, {pred_quat[1]:7.4f}, {pred_quat[2]:7.4f}, {pred_quat[3]:7.4f}]")
+                print(f"     Quaternion:  [{pred_quat_np[0]:7.4f}, {pred_quat_np[1]:7.4f}, {pred_quat_np[2]:7.4f}, {pred_quat_np[3]:7.4f}]")
                 
                 # Calcola IoU del bounding box
                 gt_bbox = gt_info['obj_bb'] 

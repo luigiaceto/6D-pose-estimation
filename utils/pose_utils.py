@@ -10,21 +10,9 @@ IMG_HEIGHT = 480
 SYMMETRIC_OBJECTS = [10, 11]
 N_POINTS_TO_LOAD = 2000
 
-# Traduzione da YOLO (0,1,2...) a LINEMOD (1,2,4...)
-YOLO_TO_LINEMOD_MAP = {
-    0: 1,  
-    1: 2,  
-    2: 4,  
-    3: 5,  
-    4: 6,  
-    5: 8,  
-    6: 9,  
-    7: 10, 
-    8: 11, 
-    9: 12, 
-    10: 13,
-    11: 14,
-    12: 15 
+# Traduzione da YOLO (0, 1, 2, ...) a LINEMOD (1, 2, 4, ...)
+YOLO_TO_LINEMOD_MAP = { 
+    0: 1, 1: 2, 2: 4, 3: 5, 4: 6, 5: 8, 6: 9, 7: 10, 8: 11, 9: 12, 10: 13, 11: 14, 12: 15 
 }
 
 LINEMOD_OBJECT_NAMES = {
@@ -34,8 +22,7 @@ LINEMOD_OBJECT_NAMES = {
     "MEAN": "MEAN"
 }
 
-# ------------------ FUNZIONI DI UTILS GENERICHE -------------------
-#region
+
 def yolo_to_xyxy(yolo_box, img_width, img_height):
     """Convert YOLO format (x_center, y_center, width, height) to (x1, y1, x2, y2)."""
     x_center, y_center, width, height = yolo_box
@@ -46,6 +33,7 @@ def yolo_to_xyxy(yolo_box, img_width, img_height):
     return [x1, y1, x2, y2]
 
 
+<<<<<<< HEAD
 def compute_z_from_depth_crop(cropped_depth):
     """
     Calcola la coordinata Z (depth) usando un ROBUSTO PERCENTILE vettorizzato.
@@ -92,6 +80,8 @@ def compute_z_from_depth_crop(cropped_depth):
 
 
 
+=======
+>>>>>>> 5257fc948ef1175949f7657d55b47f616b62456b
 def quaternion_to_rotation_matrix(quaternion):
     """
     Converte quaternion (B, 4) a rotation matrix (B, 3, 3).
@@ -118,6 +108,69 @@ def quaternion_to_rotation_matrix(quaternion):
     
     return R
 
+
+def compute_translation_from_depth_crop(cropped_depth, pred_uv, cam_k):
+    """
+    Calcola la coordinata Z (depth) usando un ROBUSTO PERCENTILE vettorizzato.
+    
+    Bug #2 Fix: Invece di campionare solo il centro fisso (che fallisce con jitter),
+    usa il 10° percentile dell'intero crop valido (assume l'oggetto sia la cosa più vicina).
+    
+    IMPORTANTE: Assume che cropped_depth sia GIÀ IN METRI (garantito dal dataset).
+    """
+    B, _, H, W = cropped_depth.shape 
+    
+    depth_m = cropped_depth.clone().detach() # metri
+    
+    # --- Sampling Robusto su TUTTO il Crop (non solo centro) ---
+    # Con il jitter del bbox, l'oggetto può essere decentrato.
+    # Prendo quindi il PERCENTILE dei valori più vicini (assume oggetto > background)
+    
+    # Flatten dell'intera depth map per ogni sample
+    flat_depth = depth_m[:, 0, :, :].reshape(B, -1)  # (B, H*W)
+    
+    # --- Filtro Background e Outlier (Vettorizzato con NaN) ---
+    # Creiamo una maschera dei valori validi
+    valid_mask = (flat_depth > 0.05) & (flat_depth < 4.0)
+    
+    # Sostituiamo i valori invalidi con NaN (Not a Number)
+    depth_with_nans = flat_depth.clone()
+    depth_with_nans[~valid_mask] = float('nan')
+    
+    # --- Calcolo Percentile Robusto (10% dei valori più vicini) ---
+    # Strategia: L'oggetto è tipicamente la cosa più vicina nel crop.
+    # Prendiamo il 10° percentile (ignora outlier come background lontano o pixel nulli)
+    
+    # Ordino i valori ignorando i NaN
+    sorted_depths = torch.sort(depth_with_nans, dim=1).values  # (B, H*W)
+    
+    # Calcola l'indice del 10° percentile.
+    # Conta quanti valori validi ci sono per ogni sample.
+    valid_counts = torch.sum(~torch.isnan(depth_with_nans), dim=1)  # (B,)
+    percentile_idx = (valid_counts * 0.10).long().clamp(min=0, max=H*W-1)  # 10° percentile
+    
+    # Estraggo il valore del percentile per ogni batch
+    z_finals = sorted_depths[torch.arange(B), percentile_idx]
+    
+    # --- Fallback per righe completamente invalide ---
+    invalid_batch_mask = torch.isnan(z_finals)
+    
+    if invalid_batch_mask.any():
+        z_finals[invalid_batch_mask] = 0.5 
+
+    z_final = z_finals.unsqueeze(1) # (B, 1)
+
+    # --- Back-Projection ---
+    # Mantengo dimensionalità (B, 1) per corretto broadcasting
+    fx, fy = cam_k[:, 0:1], cam_k[:, 1:2]
+    cx, cy = cam_k[:, 2:3], cam_k[:, 3:4]
+    
+    tx = (pred_uv[:, 0:1] - cx) * z_final / fx
+    ty = (pred_uv[:, 1:2] - cy) * z_final / fy
+    
+    return torch.cat([tx, ty, z_final], dim=1)
+
+
 def load_models_points(dataset_root, num_points=1000):
     """
     Carica i modelli 3D dal disco usando Farthest Point Sampling (FPS) 
@@ -139,7 +192,6 @@ def load_models_points(dataset_root, num_points=1000):
             # --- ALGORITMO FARTHEST POINT SAMPLING ---
             n_vertices = vertices.shape[0]
             if n_vertices > num_points:
-                # Inizializzazione
                 sampled_idxs = np.zeros(num_points, dtype=np.int32)
                 # Scegliamo il primo punto a caso o il primo vertice
                 sampled_idxs[0] = 0 
@@ -171,8 +223,28 @@ def load_models_points(dataset_root, num_points=1000):
     print(f"✅ Loaded {len(cache)} models with FPS.")
     return cache
 
-#endregion
 
+def compute_ADD(pred_R, gt_R, points, pred_t=None, gt_t=None):
+    """ Calcola la metrica ADD (Average Distance of Model Points) """
+    # Caso Rotation-Only
+    if pred_t is None: pred_t = torch.zeros((pred_R.shape[0], 3, 1), device=pred_R.device)
+    if gt_t is None: gt_t = torch.zeros((gt_R.shape[0], 3, 1), device=gt_R.device)
+
+    # Trasposizione i punti per la moltiplicazione: (B, N, 3) -> (B, 3, N)
+    points_t = points.transpose(1, 2)
+
+    # Applicazione trasformazione: R * p + t
+    # (B, 3, 3) x (B, 3, N) -> (B, 3, N) + (B, 3, 1) -> (B, 3, N)
+    p_pred = torch.bmm(pred_R, points_t) + pred_t
+    p_gt = torch.bmm(gt_R, points_t) + gt_t
+
+    # Calcolo distanza Euclidea per ogni punto: Norm su dim=1 (x,y,z)
+    dists = torch.norm(p_pred - p_gt, dim=1) # (B, N)
+
+    # Media su tutti i punti dell'oggetto: (B,)
+    return dists.mean(dim=1)
+
+<<<<<<< HEAD
 # --------------------- FUNZIONI UTILS PER IL TRAINING --------------
 #region
     
@@ -212,28 +284,48 @@ def compute_geodesic_loss(pred_quat, gt_quat):
     sin_half = torch.sqrt((1.0 - cos_angle) / 2.0 + 1e-7)
     
     return torch.mean(sin_half)
+=======
 
-def compute_batch_rotation_error(pred_quat, gt_quat, class_ids, symmetry_lookup, model_points):
+def compute_ADDS(pred_R, gt_R, points, pred_t=None, gt_t=None):
+    """ Calcola la metrica ADD (Average Distance of Model Points) """
+    if pred_t is None: pred_t = torch.zeros((pred_R.shape[0], 3, 1), device=pred_R.device)
+    if gt_t is None:   gt_t = torch.zeros((gt_R.shape[0], 3, 1), device=gt_R.device)
+
+    points_t = points.transpose(1, 2)
+>>>>>>> 5257fc948ef1175949f7657d55b47f616b62456b
+
+    p_pred = (torch.bmm(pred_R, points_t) + pred_t).transpose(1, 2) # (B, N, 3)
+    p_gt = (torch.bmm(gt_R, points_t) + gt_t).transpose(1, 2)     # (B, N, 3)
+
+    # Calcolo matrice distanze tutti-contro-tutti: (B, N, N)
+    dist_matrix = torch.cdist(p_pred, p_gt, p=2)
+
+    # Per ogni punto predetto, trova il punto GT più vicino (min su dim=2)
+    min_dists, _ = torch.min(dist_matrix, dim=2) # (B, N)
+
+    return min_dists.mean(dim=1)
+
+
+def compute_rotation_error(pred_quat, gt_quat, class_ids, symmetry_lookup, model_points):
     """
     Calcola l'errore di rotazione medio in GRADI per l'intero batch,
-    gestendo correttamente le simmetrie per evitare falsi positivi.
+    gestendo correttamente le simmetrie.
     """
     with torch.no_grad():
         B = pred_quat.shape[0]
         is_sym = symmetry_lookup[class_ids.long()] # Maschera Booleana (B,)
         errors = torch.zeros(B, device=pred_quat.device)
         
-        # --- 1. ASIMMETRICI: Calcolo Geodetico Standard ---
         if (~is_sym).any():
+            # errore rotazionale calcolato come errore geodesico dei quaternioni
             p_q = F.normalize(pred_quat[~is_sym], p=2, dim=1)
             g_q = F.normalize(gt_quat[~is_sym], p=2, dim=1)
             dot = torch.abs(torch.sum(p_q * g_q, dim=1))
             dot = torch.clamp(dot, -1.0, 1.0)
             errors[~is_sym] = torch.rad2deg(2 * torch.acos(dot))
             
-        # --- 2. SIMMETRICI: Calcolo Symmetry-Aware (ADD-S) ---
         if is_sym.any():
-            # Convertiamo in matrici per trasformare i punti
+            # errore rotazionale calcolato coi modelli 3D (usa una logica simile alla ADDS)
             p_R = quaternion_to_rotation_matrix(pred_quat[is_sym])
             g_R = quaternion_to_rotation_matrix(gt_quat[is_sym])
             pts = model_points[class_ids[is_sym].long()] # (B_sym, N, 3)
@@ -253,6 +345,7 @@ def compute_batch_rotation_error(pred_quat, gt_quat, class_ids, symmetry_lookup,
             
         return errors.mean()
 
+<<<<<<< HEAD
 def compute_add_rot_loss(pred_R, gt_R, points):
     """
     Versione PyTorch Batch per il training.
@@ -380,10 +473,18 @@ def compute_rotation_error(pred_R, gt_R, class_id, model_points):
         cos_angle = np.clip((trace - 1) / 2, -1.0, 1.0)
         return np.degrees(np.arccos(cos_angle))
 
+=======
+>>>>>>> 5257fc948ef1175949f7657d55b47f616b62456b
 
 def compute_translation_error(pred_t, gt_t):
     """Errore di translation in CM (già convertito per compatibilità con codice esistente)."""
-    return np.linalg.norm(pred_t - gt_t) * 100  # metri -> cm
+    if pred_t.ndim == 3: pred_t = pred_t.squeeze(-1)
+    if gt_t.ndim == 3:   gt_t = gt_t.squeeze(-1)
+
+    # Calcolo vettorizzato (Batch)
+    errors = torch.norm(pred_t - gt_t, dim=1)
+
+    return errors.mean() * 100.0
 
 
 def print_evaluation_results_table(metrics_per_class, save_table=False, table_path="evaluation_results.csv"):
@@ -429,5 +530,8 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
         df.to_csv(table_path, index=False)
         print(f"Saved CSV to {table_path}")
     return df
+<<<<<<< HEAD
 #endregion
 
+=======
+>>>>>>> 5257fc948ef1175949f7657d55b47f616b62456b
