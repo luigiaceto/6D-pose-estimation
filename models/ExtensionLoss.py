@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from models.PinholeCamera import PinholeCamera
 from utils.pose_utils import (
     compute_add_rot_loss,
     compute_adds_rot_loss,
@@ -11,24 +12,22 @@ from utils.pose_utils import (
 
 class ExtensionLoss(nn.Module):
     """
-    Loss PURAMENTE GEOMETRICA per 6D Pose Estimation.
-    ELIMINA completamente Geodesic Loss e Quaternion Loss algebriche.
+    Loss GEOMETRICA 3D + 2D per 6D Pose Estimation.
     
     Componenti:
-    - L_rot: Centered ADD/ADD-S (isola rotazione sui punti centrati, traslazione = 0)
-    - L_trans: Pure Translation L1 (distanza euclidea sui vettori [x,y,z])
-    - L_proj: 2D Projection (distanza pixel, opzionale per regolarizzazione)
+    - L_rot: Centered ADD/ADD-S (isola rotazione sui punti centrati)
+    - L_trans: Pure Translation L1 (distanza euclidea in metri)
+    - L_proj: 2D Projection (regolarizzazione, guida ottimizzazione)
     
     Total Loss = λ_rot * L_rot + λ_trans * L_trans + λ_proj * L_proj
+    
+    NOTA: La ricostruzione 3D (back-projection) è ora nel modello.
     """
     def __init__(self, rot_weight, trans_weight, proj_weight, cam_k, model_points_dict):
         super().__init__()
-
-        # Register camera intrinsics [fx, fy, cx, cy]
-        self.register_buffer(
-            'cam_k',
-            torch.tensor([cam_k[0], cam_k[4], cam_k[2], cam_k[5]]).view(1, 4)
-        )
+        
+        # Initialize PinholeCamera for 3D↔2D conversions
+        self.pinhole = PinholeCamera(cam_k)
         
         # Build model points bank (object_id → 3D points)
         max_id = max(model_points_dict.keys())
@@ -45,28 +44,28 @@ class ExtensionLoss(nn.Module):
                 symmetry_mask[obj_id] = True
         self.register_buffer('symmetry_lookup', symmetry_mask)
 
-        # Loss weights (can be updated dynamically during training)
+        # Loss weights
         self.w_rot = rot_weight
         self.w_trans = trans_weight
         self.w_proj = proj_weight
 
-    def forward(self, pred_quat, pred_delta_z, gt_quat, gt_trans, pred_2d, class_ids, z_geometric):
+    def forward(self, pred_quat, pred_trans, gt_quat, gt_trans, class_ids):
         """
+        Loss geometrica 3D + 2D: confronta rotation, translation 3D e proiezione 2D.
+        
         Args:
-            pred_quat: (B, 4) - Predicted quaternion
-            pred_delta_z: (B, 1) - Predicted depth refinement
+            pred_quat: (B, 4) - Predicted quaternion (normalizzato)
+            pred_trans: (B, 3) - Predicted translation in metri [x, y, z]
             gt_quat: (B, 4) - Ground truth quaternion
-            gt_trans: (B, 3) - Ground truth translation [x, y, z]
-            pred_2d: (B, 2) - Predicted 2D pixel offset [u, v]
-            class_ids: (B,) - Object class IDs for each sample
-            z_geometric: (B, 1) - Geometric depth estimate (from solve_translation)
+            gt_trans: (B, 3) - Ground truth translation in metri [x, y, z]
+            class_ids: (B,) - Object class IDs
         
         Returns:
             dict: {
-                'total_loss': weighted sum of all losses,
-                'rot_loss': centered ADD/ADD-S (detached for logging),
-                'trans_loss': pure translation L1 (detached),
-                'proj_loss': 2D projection (detached),
+                'total_loss': weighted sum,
+                'rot_loss': centered ADD/ADD-S,
+                'trans_loss': translation L1,
+                'proj_loss': 2D projection error,
                 'trans_err_cm': translation error in cm,
                 'proj_err_px': projection error in pixels,
                 'rot_err_deg': rotation error in degrees
@@ -74,41 +73,26 @@ class ExtensionLoss(nn.Module):
         """
         device = pred_quat.device
         
-        # ============================================
-        # STEP 1: Reconstruct 3D translation from 2D + depth
-        # ============================================
-        z_final = z_geometric.detach() + pred_delta_z
-        z_safe = torch.clamp(z_final, min=0.01)
+        # STEP 1: Compute 2D projections 
+        # Clamp depth per evitare divisioni per zero
+        pred_trans_safe = pred_trans.clone()
+        pred_trans_safe[:, 2] = torch.clamp(pred_trans[:, 2], min=0.01)
         
-        fx, fy = self.cam_k[:, 0:1], self.cam_k[:, 1:2]
-        cx, cy = self.cam_k[:, 2:3], self.cam_k[:, 3:4]
+        gt_trans_safe = gt_trans.clone()
+        gt_trans_safe[:, 2] = torch.clamp(gt_trans[:, 2], min=0.01)
         
-        pred_x = (pred_2d[:, 0:1] - cx) * z_safe / fx
-        pred_y = (pred_2d[:, 1:2] - cy) * z_safe / fy
-        pred_trans = torch.cat([pred_x, pred_y, z_safe], dim=1)  # (B, 3)
-
-        # ============================================
-        # STEP 2: Compute ground truth 2D projection (for L_proj)
-        # ============================================
-        gt_z_safe = torch.clamp(gt_trans[:, 2:3], min=0.001)
-        gt_u = (gt_trans[:, 0:1] * fx / gt_z_safe) + cx
-        gt_v = (gt_trans[:, 1:2] * fy / gt_z_safe) + cy
-        gt_2d_target = torch.cat([gt_u, gt_v], dim=1)  # (B, 2)
-
-        # ============================================
-        # LOSS COMPUTATION: PURE GEOMETRY (VECTORIZED)
-        # ============================================
+        # Proiezione 3D → 2D
+        pred_2d = self.pinhole.project_3d_to_2d(pred_trans_safe)  # (B, 2)
+        gt_2d = self.pinhole.project_3d_to_2d(gt_trans_safe)      # (B, 2)
+        
+        # STEP 2: LOSS COMPUTATION
         
         # --- L_rot: Centered ADD/ADD-S (rotation-only, optimized) ---
         batch_points = self.model_points_bank[class_ids.long()]  # (B, N, 3)
         pred_R = quaternion_to_rotation_matrix(pred_quat)  # (B, 3, 3)
         gt_R = quaternion_to_rotation_matrix(gt_quat)      # (B, 3, 3)
         
-        # Symmetry mask: True for symmetric objects (Eggbox, Glue)
         is_symmetric = self.symmetry_lookup[class_ids.long()]  # (B,)
-        
-        # Bug #7 Fix: Compute losses only for relevant objects using masking
-        # This avoids expensive O(N²) cdist computation for asymmetric objects
         loss_rot_values = torch.zeros(len(class_ids), device=device)
         
         # Compute ADD for asymmetric objects only
@@ -121,7 +105,7 @@ class ExtensionLoss(nn.Module):
             )
             loss_rot_values[asym_mask] = loss_add
         
-        # Compute ADD-S for symmetric objects only (more expensive due to cdist)
+        # Compute ADD-S for symmetric objects only
         if is_symmetric.any():
             sym_mask = is_symmetric
             loss_adds = compute_adds_rot_loss(
@@ -136,25 +120,20 @@ class ExtensionLoss(nn.Module):
         # --- L_trans: Pure Translation L1 (in METERS) ---
         loss_trans = F.l1_loss(pred_trans, gt_trans)
         
-        # --- L_proj: 2D Projection (optional regularization) ---
-        loss_proj = F.smooth_l1_loss(pred_2d, gt_2d_target, beta=1.0)
+        # --- L_proj: 2D Projection (regolarizzazione) ---
+        loss_proj = F.smooth_l1_loss(pred_2d, gt_2d, beta=1.0)
 
-        # ============================================
-        # TOTAL LOSS: Weighted sum
-        # ============================================
+        # TOTAL LOSS
         total_loss = (
             self.w_rot * loss_rot + 
             self.w_trans * loss_trans + 
             self.w_proj * loss_proj
         )
 
-        # ============================================
-        # METRICS FOR LOGGING (no gradients)
-        # ============================================
+        # METRICS FOR LOGGING
         with torch.no_grad():
             trans_err_cm = torch.norm(pred_trans - gt_trans, p=2, dim=1).mean() * 100
-            proj_err_px = torch.norm(pred_2d - gt_2d_target, p=2, dim=1).mean()
-            # Rotation error (handles symmetric/asymmetric automatically)
+            proj_err_px = torch.norm(pred_2d - gt_2d, p=2, dim=1).mean()
             rot_err_deg = compute_batch_rotation_error(
                 pred_quat, gt_quat, class_ids, 
                 self.symmetry_lookup, self.model_points_bank

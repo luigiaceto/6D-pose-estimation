@@ -10,9 +10,10 @@ import torchvision.transforms as transforms
 from ultralytics import YOLO
 
 from models.TridentNetPose import TridentNetPose
+from models.PinholeCamera import PinholeCamera
 from utils.pose_utils import quaternion_to_rotation_matrix, YOLO_TO_LINEMOD_MAP
 from utils.visualization import draw_3d_bbox_colored, draw_axis_colored
-from utils.pose_utils import compute_translation_from_depth_crop
+from utils.pose_utils import compute_z_from_depth_crop
 
 # =============================================================================
 # HELPER PER DEPTH PROCESSING
@@ -197,30 +198,16 @@ def visualize_fusion_predictions(
             center_y = y_min + (y_max - y_min) / 2.0
             tensor_center = torch.tensor([[center_x, center_y]], dtype=torch.float32).to(device)
             
-            # --- E. Inference con Residual Learning ---
+            # --- E. Inference con back-projection interna ---
             with torch.no_grad():
-                # Forward Pass: RGB + Depth + Center -> Quaternion + Delta_Z + UV
-                pred_quat, pred_delta_z, pred_uv = pose_model(tensor_rgb, tensor_depth, tensor_center, tensor_bbox_dims)
-                
-                # Ricostruisci translation con residual learning
-                cam_k_tensor = torch.tensor([cam_k[0], cam_k[4], cam_k[2], cam_k[5]], device=device).unsqueeze(0)
-                
-                # Calcola Z geometrico robusto
-                trans_geometric = compute_translation_from_depth_crop(
-                    cropped_depth=tensor_depth,
-                    pred_uv=pred_uv,
-                    cam_k=cam_k_tensor,
+                # Forward Pass: RGB + Depth + Center -> Quaternion + Translation
+                # (z_geometric calcolato internamente dal modello)
+                pred_quat, pred_trans = pose_model(
+                    tensor_rgb, 
+                    tensor_depth, 
+                    tensor_center, 
+                    tensor_bbox_dims
                 )
-                
-                z_geometric = trans_geometric[:, 2:3]
-                z_final = z_geometric + pred_delta_z  # (1, 1)
-                
-                # Back-projection completa
-                fx, fy, cx, cy = cam_k_tensor[:, 0:1], cam_k_tensor[:, 1:2], cam_k_tensor[:, 2:3], cam_k_tensor[:, 3:4]
-                z_safe = torch.clamp(z_final, min=0.01)
-                pred_x = (pred_uv[:, 0:1] - cx) * z_safe / fx
-                pred_y = (pred_uv[:, 1:2] - cy) * z_safe / fy
-                pred_trans = torch.cat([pred_x, pred_y, z_safe], dim=1)  # (1, 3)
             
             # Conversioni per visualizzazione
             pred_t_np = pred_trans[0].cpu().numpy() # [x, y, z] in metri

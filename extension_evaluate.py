@@ -5,6 +5,7 @@ from tqdm import tqdm
 from collections import defaultdict
 
 from models.TridentNetPose import TridentNetPose
+from models.PinholeCamera import PinholeCamera
 from utils.pose_utils import (
     quaternion_to_rotation_matrix,  
     load_models_points, 
@@ -13,8 +14,8 @@ from utils.pose_utils import (
     batch_compute_add_metric,
     batch_compute_add_s_metric,
     compute_translation_error,
-    compute_translation_from_depth_crop,
-    SYMMETRIC_OBJECTS
+    SYMMETRIC_OBJECTS,
+    N_POINTS_TO_LOAD
 )
 
 
@@ -33,9 +34,9 @@ def evaluate_extension_batch(
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
-    
+
     object_diameters = test_dataset.get_object_diameters() 
-    num_points = 1500
+    num_points = N_POINTS_TO_LOAD
     print("Preloading mesh points for batch evaluation...")
     mesh_points_cache = load_models_points(dataset_root, num_points=num_points)
     print(f"Loaded {len(mesh_points_cache)} objects with {num_points} surface points each")
@@ -67,31 +68,13 @@ def evaluate_extension_batch(
             # SCALING DEPTH: CNN vuole valori piccoli (mm -> m se necessario)
             net_input_depth = depth / 1000.0
 
-            # Forward - Modello restituisce (quaternion, delta_z, uv)
-            pred_quat, pred_delta_z, pred_uv = model(rgb, net_input_depth, bbox_center, bbox_dims)
-            
-            # Z_final = Z_geometric + Delta_Z
-            cam_k_tensor = torch.tensor([cam_k[0], cam_k[4], cam_k[2], cam_k[5]], device=device).unsqueeze(0)
-            cam_k_batch = cam_k_tensor.repeat(len(pred_quat), 1)
-            
-            # 1. Calcola z geometricamente
-            trans_geometric = compute_translation_from_depth_crop(
-                cropped_depth=depth,        # Tensore (B, 1, H, W) dal dataloader in METRI
-                pred_uv=pred_uv,            # Centro (u,v) predetto dalla rete
-                cam_k=cam_k_batch,
+            # Forward - Modello restituisce (pred_quat, pred_trans) con back-projection interna
+            pred_quat, pred_trans = model(
+                rgb, 
+                net_input_depth, 
+                bbox_center, 
+                bbox_dims
             )
-            
-            # 2. Estrai Z e aggiungi correzione rete
-            z_geometric = trans_geometric[:, 2:3]  # (B, 1)
-            
-            z_final = z_geometric + pred_delta_z  # (B, 1)
-            
-            # 3. Back-projection completa per ottenere pred_trans
-            fx, fy, cx, cy = cam_k_batch[:, 0:1], cam_k_batch[:, 1:2], cam_k_batch[:, 2:3], cam_k_batch[:, 3:4]
-            z_safe = torch.clamp(z_final, min=0.01)
-            pred_x = (pred_uv[:, 0:1] - cx) * z_safe / fx
-            pred_y = (pred_uv[:, 1:2] - cy) * z_safe / fy
-            pred_trans = torch.cat([pred_x, pred_y, z_safe], dim=1)  # (B, 3)
             
             pred_rot_matrix = quaternion_to_rotation_matrix(pred_quat) # (B, 3, 3)
             
@@ -104,10 +87,10 @@ def evaluate_extension_batch(
             pred_t_b = pred_trans.unsqueeze(-1)
             gt_t_b = gt_trans.unsqueeze(-1)
             
-            # Calcola ADD (Asimmetrico) per TUTTI
+            # Calcola ADD (Asimmetrico)
             add_losses = batch_compute_add_metric(pred_rot_matrix, pred_t_b, gt_rot_matrix, gt_t_b, batch_points)
             
-            # Calcola ADD-S (Simmetrico) per TUTTI
+            # Calcola ADD-S (Simmetrico)
             adds_losses = batch_compute_add_s_metric(pred_rot_matrix, pred_t_b, gt_rot_matrix, gt_t_b, batch_points)
             
             # Portiamo tutto su CPU per logging e calcoli finali leggeri

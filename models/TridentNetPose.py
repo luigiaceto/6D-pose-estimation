@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
-from utils.pose_utils import IMG_HEIGHT, IMG_WIDTH
+from utils.pose_utils import IMG_HEIGHT, IMG_WIDTH, compute_z_from_depth_crop
+from models.PinholeCamera import PinholeCamera
 
 class DepthEncoder(nn.Module):
     """
@@ -79,21 +80,17 @@ class TridentNetPose(nn.Module):
         # --- Head Rotazione ---
         self.rot_head = nn.Linear(1024, 4) # Output: 4 quaternioni
         
-        # --- Head Depth (Z) - RESIDUAL LEARNING + GEOMETRIC INJECTION ---
+        # --- Head Depth (Z) 
         # Invece di predire Z assoluta, predice un DELTA (correzione skin-to-heart)
         # Inizializzazione vicino a 0 così all'inizio si affida alla geometria
-        # +1 nella input_dim per accettare z_geometric concatenato
         self.z_head = nn.Sequential(
-            nn.Linear(1025, 128),  # 1024 (fused features) + 1 (z_geometric normalizzato)
+            nn.Linear(1024, 128),  # Solo fused features (no z_geometric injection)
             nn.ReLU(),
             nn.Dropout(0.2),
             nn.Linear(128, 1)  # Output: Delta_Z (metri) - correzione da applicare a Z_geometric
         )
 
         # --- Head Offset u & v ---
-        # N.B. si sarebbe potuto usare un'unica testa per predirre
-        # Z, δu e δv ma Z è in metri e gli altri due pixel. Si potrebbero
-        # avere problemi di scala e quindi training più instabile (?).
         self.offset_head = nn.Sequential(
             nn.Linear(1024, 128),
             nn.ReLU(),
@@ -104,91 +101,98 @@ class TridentNetPose(nn.Module):
         self._init_weights()
 
     def _init_weights(self):
-        # Inizializzazione Xavier per le head lineari
-        for m in [self.fusion_fc, self.rot_head, self.z_head, self.offset_head]:
+        # 1. Inizializzazione GENERICA per i moduli "standard"
+        for m in [self.fusion_fc, self.z_head, self.offset_head]:
             for layer in m.modules():
                 if isinstance(layer, nn.Linear):
                     nn.init.xavier_uniform_(layer.weight, gain=1.0)
                     if layer.bias is not None:
                         nn.init.constant_(layer.bias, 0.0)
         
-        # Per la rotazione, inizializzazione specifica
+        # 2. Inizializzazione SPECIFICA per la Rotazione (Rot Head)
+        # Gain 0.01 serve a far partire la rotazione come "quasi uniforme" ma deterministica
         nn.init.xavier_uniform_(self.rot_head.weight, gain=0.01)
         
-        # 🎯 RESIDUAL Z: Inizializza delta_z ~0 (piccolo gain per stabilità)
-        nn.init.xavier_uniform_(self.z_head[-1].weight, gain=0.01)
-        nn.init.constant_(self.z_head[-1].bias, 0.0)
-
+        # Bias: Quaternione identità [1, 0, 0, 0] (w, x, y, z)
+        # Importante: così all'inizio la rete predice "nessuna rotazione" invece di rotazione random
         with torch.no_grad():
             self.rot_head.bias.fill_(0)
             self.rot_head.bias[0] = 1.0
 
-    def forward(self, rgb, depth, bbox_center_pixel, bbox_dims, z_geometric=None):
+        # 3. Sovrascrittura SPECIFICA per l'ultimo layer di Z (Residual)
+        # I layer precedenti di z_head sono stati inizializzati nel loop sopra (gain 1.0).
+        # Qui sovrascriviamo SOLO l'ultimo per farlo partire da ~0.
+        nn.init.xavier_uniform_(self.z_head[-1].weight, gain=0.01)
+        nn.init.constant_(self.z_head[-1].bias, 0.0)
+
+    def forward(self, rgb, depth, bbox_center_pixel, bbox_dims):
         """
-        rgb: (B, 3, 224, 224)
-        depth: (B, 1, 224, 224)
-        bbox_center_pixel: (B, 2) -> [u, v]
-        z_geometric: (B, 1) -> Profondità geometrica (opzionale, per Geometric Injection)
+        Forward pass con back-projection interna: calcola direttamente la translation 3D.
+        
+        Args:
+            rgb: (B, 3, 224, 224) - RGB crop
+            depth: (B, 1, 224, 224) - Depth crop
+            bbox_center_pixel: (B, 2) - Centro bbox [u, v]
+            bbox_dims: (B, 2) - Dimensioni bbox normalizzate [w%, h%]
+        
+        Returns:
+            pred_quat: (B, 4) - Quaternione normalizzato
+            pred_trans: (B, 3) - Translation assoluta in metri [x, y, z]
         """
+        
+        # --- Calcolo Z Geometric Prior (interno) ---
+        z_geometric = compute_z_from_depth_crop(cropped_depth=depth)  # (B, 1)
         
         # --- Feature Extraction ---
         rgb_feat = self.rgb_backbone(rgb).view(rgb.size(0), -1)     # (B, 2048)
         depth_feat = self.depth_backbone(depth)                     # (B, 512)
         
         # --- Fusion ---
-        # concatenazione vettori
         fused = torch.cat([rgb_feat, depth_feat, bbox_dims], dim=1) # (B, 2562)
         fused = self.fusion_fc(fused)                               # (B, 1024)
         
         # --- Prediction Heads ---
-        # ** Rotazione **
-        quaternion = self.rot_head(fused)
-        quaternion = F.normalize(quaternion, p=2, dim=1)
+        # Rotazione 
+        pred_quat = self.rot_head(fused)
+        pred_quat = F.normalize(pred_quat, p=2, dim=1)
         
-        # ** Depth Z - RESIDUAL DELTA + GEOMETRIC INJECTION **
-        # Se z_geometric è fornito, lo concateniamo alle features
-        z_norm = z_geometric / 2.0  # (B, 1)
-        fused_z = torch.cat([fused, z_norm], dim=1)  # (B, 1025)
-    
-        # La rete predice solo un DELTA (correzione), non un valore assoluto
-        # Delta_Z sarà combinato con Z_geometric nella loss
-        delta_z = self.z_head(fused_z)  # (B, 1) - delta in metri (può essere +/-)
+        # Depth Z - RESIDUAL DELTA (solo da feature visive) 
+        delta_z = self.z_head(fused)  # (B, 1) - predice delta solo dalle feature
         
-        # ** Offset Scale-Invariant (Percentuale del BBox) **
-        # La rete predice offset come percentuale delle dimensioni del bbox
-        delta_pct = self.offset_head(fused)  # (B, 2) - valori interpretati come percentuale
+        # Combina geometric prior + delta learned
+        pred_z = z_geometric + delta_z  # (B, 1)
+        pred_z = torch.clamp(pred_z, min=0.01)  # Evita depth negativa
         
-        
+        # Offset 2D (percentuale bbox)
+        delta_pct = self.offset_head(fused)  # (B, 2)
         offset_px_x = delta_pct[:, 0:1] * bbox_dims[:, 0:1] * IMG_WIDTH  # (B, 1)
         offset_px_y = delta_pct[:, 1:2] * bbox_dims[:, 1:2] * IMG_HEIGHT  # (B, 1)
         offset_px = torch.cat([offset_px_x, offset_px_y], dim=1)     # (B, 2)
         
-        # Somma l'offset al centro del bbox per ottenere coordinate uv finali
-        uv = bbox_center_pixel + offset_px  # (B, 2)
-
-        # 🎯 HYBRID APPROACH: Restituisci delta_z (non translation completa)
-        # La translation finale sarà z_geometric + delta_z (calcolata nella loss)
-        return quaternion, delta_z, uv  # [quaternion, delta_z (residual), centro 2D]
+        # Coordinate pixel finali
+        pred_uv = bbox_center_pixel + offset_px  # (B, 2)
+        
+        # BACK-PROJECTION: Da (u, v, z) a (x, y, z)
+        pred_trans = PinholeCamera.apply_unprojection(
+            points_2d=pred_uv,     # (B, 2)
+            depth=pred_z,          # (B, 1)
+            intrinsics=self.cam_k  # (1, 4)
+        )  # Restituisce (B, 3)
+        
+        return pred_quat, pred_trans
 
     def freeze_rgb(self):
         for param in self.rgb_backbone.parameters():
             param.requires_grad = False
             
-    def unfreeze_rgb(self, partial=False):
-        """Unfreezes RGB backbone.
-        
-        Args:
-            partial:
-                - If True, unfreezes only layer4 (last residual block).
-                - If False, unfreezes all layers.
+    def unfreeze_rgb(self):
         """
-
-        # ResNet structure: conv1, bn1, relu, maxpool, layer1, layer2, layer3, layer4, avgpool
-        if partial:
-            # Sblocca solo layer4 (ultimo blocco convoluzionale)
-            for param in self.rgb_backbone[-2].parameters():
-                param.requires_grad = True
-        else:
-            # Sblocca tutta la ResNet
-            for param in self.rgb_backbone.parameters():
-                param.requires_grad = True
+        Unfreezes only layer4 (last residual block) of RGB backbone.
+        
+        Partial unfreeze strategy:
+        - Mantiene frozen i layer bassi (conv1-layer3) per preservare feature ImageNet
+        - Sblocca solo layer4 (ultimo blocco) per adattamento al task specifico
+        - Migliore stabilità con dataset piccoli come LineMOD
+        """
+        for param in self.rgb_backbone[-2].parameters():
+            param.requires_grad = True

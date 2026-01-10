@@ -46,30 +46,18 @@ def yolo_to_xyxy(yolo_box, img_width, img_height):
     return [x1, y1, x2, y2]
 
 
-def compute_translation_from_depth_crop(cropped_depth, pred_uv, cam_k):
+def compute_z_from_depth_crop(cropped_depth):
     """
     Calcola la coordinata Z (depth) usando un ROBUSTO PERCENTILE vettorizzato.
-    
-    Bug #2 Fix: Invece di campionare solo il centro fisso (che fallisce con jitter),
-    usa il 10° percentile dell'intero crop valido (assume l'oggetto sia la cosa più vicina).
-    
-    IMPORTANTE: Assume che cropped_depth sia GIÀ IN METRI (garantito dal dataset).
     """
     B, _, H, W = cropped_depth.shape 
     
-    # --- 1. Nessuna conversione unità - Dataset garantisce metri ---
-    # Bug #3 Fix: Rimossa euristica fragile (if median > 10 -> divide)
-    # Il dataset DEVE fornire depth in metri, altrimenti correggi il dataset.
     depth_m = cropped_depth.clone().detach()
-    
-    # --- 2. Sampling Robusto su TUTTO il Crop (non solo centro) ---
-    # Bug #2 Fix: Con il jitter del bbox, l'oggetto può essere decentrato.
-    # Soluzione: Prendi il PERCENTILE dei valori più vicini (assume oggetto > background)
-    
+     
     # Flatten dell'intera depth map per ogni sample
     flat_depth = depth_m[:, 0, :, :].reshape(B, -1)  # (B, H*W)
     
-    # --- 3. Filtro Background e Outlier (Vettorizzato con NaN) ---
+    # Filtro Background e Outlier (Vettorizzato con NaN) ---
     # Creiamo una maschera dei valori validi
     valid_mask = (flat_depth > 0.05) & (flat_depth < 4.0)
     
@@ -100,15 +88,7 @@ def compute_translation_from_depth_crop(cropped_depth, pred_uv, cam_k):
 
     z_final = z_finals.unsqueeze(1) # (B, 1)
 
-    # --- 6. Back-Projection ---
-    # Mantieni dimensionalità (B, 1) per corretto broadcasting
-    fx, fy = cam_k[:, 0:1], cam_k[:, 1:2]
-    cx, cy = cam_k[:, 2:3], cam_k[:, 3:4]
-    
-    tx = (pred_uv[:, 0:1] - cx) * z_final / fx
-    ty = (pred_uv[:, 1:2] - cy) * z_final / fy
-    
-    return torch.cat([tx, ty, z_final], dim=1)
+    return z_final
 
 
 
@@ -193,24 +173,8 @@ def load_models_points(dataset_root, num_points=1000):
 
 #endregion
 
-
 # --------------------- FUNZIONI UTILS PER IL TRAINING --------------
-
-def compute_quaternion_loss(q1, q2):
-        """
-        Geodesic Distance tra quaternions (gestisce ambiguità q = -q).
-        Loss: 1 - |q1 · q2|
-        
-        Usa torch.abs per gestire double cover (q e -q sono la stessa rotazione).
-        """
-        # Normalize con epsilon sicuro
-        q1 = F.normalize(q1, p=2, dim=1, eps=1e-6)
-        q2 = F.normalize(q2, p=2, dim=1, eps=1e-6)
-        # Dot product con abs per gestire q = -q
-        dot = torch.abs(torch.sum(q1 * q2, dim=1))
-        # Clamp per sicurezza (non dovrebbe servire con abs)
-        dot = torch.clamp(dot, 0.0, 1.0)
-        return torch.mean(1.0 - dot)
+#region
     
 def compute_geodesic_loss(pred_quat, gt_quat):
     """
@@ -325,10 +289,10 @@ def compute_adds_rot_loss(pred_R, gt_R, points):
     min_dist, _ = torch.min(dist_matrix, dim=2) # (B, N)
     
     return min_dist.mean(dim=1) # Ritorna (B,)
-
-
+#endregion
 
 #----------- FUNZIONI PER EVALUATON  -----------
+#region
 
 def batch_compute_add_metric(pred_R, pred_t, gt_R, gt_t, points):
     """
@@ -408,7 +372,6 @@ def compute_rotation_error(pred_R, gt_R, class_id, model_points):
 
         return np.degrees(angle_rad)
     
-
     # --- CASO ASIMMETRICO (Ape, Cat, ecc.) ---
     else:
         # Calcolo standard Geodetico
@@ -466,5 +429,5 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
         df.to_csv(table_path, index=False)
         print(f"Saved CSV to {table_path}")
     return df
-
+#endregion
 
