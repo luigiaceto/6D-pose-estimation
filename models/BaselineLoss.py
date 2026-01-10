@@ -52,7 +52,7 @@ class BaselineLoss(nn.Module):
             dict con total_loss, metriche
         """
         
-        batch_points = self.model_points_bank[class_ids.long()]  # (B, N, 3)
+        batch_points = self.model_points_bank[class_ids.long().cpu()]  # (B, N, 3)
         pred_R = quaternion_to_rotation_matrix(pred_quat)  # (B, 3, 3)
         gt_R = quaternion_to_rotation_matrix(gt_quat)      # (B, 3, 3)
             
