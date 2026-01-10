@@ -210,9 +210,6 @@ def visualize_fusion_predictions(
                     cropped_depth=tensor_depth,
                     pred_uv=pred_uv,
                     cam_k=cam_k_tensor,
-                    bbox_center=tensor_center,
-                    bbox_dims=tensor_bbox_dims,
-                    depth_in_meters=True              # EXPLICIT: depth è già in metri
                 )
                 
                 z_geometric = trans_geometric[:, 2:3]
