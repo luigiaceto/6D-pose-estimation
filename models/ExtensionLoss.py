@@ -2,10 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from utils.pose_utils import (
-    compute_add_rot_loss,
-    compute_adds_rot_loss,
+    compute_ADD,
+    compute_ADDS,
     quaternion_to_rotation_matrix,
-    compute_batch_rotation_error,
+    compute_rotation_error,
     SYMMETRIC_OBJECTS
 )
 
@@ -107,14 +107,13 @@ class ExtensionLoss(nn.Module):
         # Symmetry mask: True for symmetric objects (Eggbox, Glue)
         is_symmetric = self.symmetry_lookup[class_ids.long()]  # (B,)
         
-        # Bug #7 Fix: Compute losses only for relevant objects using masking
         # This avoids expensive O(N²) cdist computation for asymmetric objects
         loss_rot_values = torch.zeros(len(class_ids), device=device)
         
         # Compute ADD for asymmetric objects only
         if (~is_symmetric).any():
             asym_mask = ~is_symmetric
-            loss_add = compute_add_rot_loss(
+            loss_add = compute_ADD(
                 pred_R[asym_mask], 
                 gt_R[asym_mask], 
                 batch_points[asym_mask]
@@ -124,7 +123,7 @@ class ExtensionLoss(nn.Module):
         # Compute ADD-S for symmetric objects only (more expensive due to cdist)
         if is_symmetric.any():
             sym_mask = is_symmetric
-            loss_adds = compute_adds_rot_loss(
+            loss_adds = compute_ADDS(
                 pred_R[sym_mask], 
                 gt_R[sym_mask], 
                 batch_points[sym_mask]
@@ -155,7 +154,7 @@ class ExtensionLoss(nn.Module):
             trans_err_cm = torch.norm(pred_trans - gt_trans, p=2, dim=1).mean() * 100
             proj_err_px = torch.norm(pred_2d - gt_2d_target, p=2, dim=1).mean()
             # Rotation error (handles symmetric/asymmetric automatically)
-            rot_err_deg = compute_batch_rotation_error(
+            rot_err_deg = compute_rotation_error(
                 pred_quat, gt_quat, class_ids, 
                 self.symmetry_lookup, self.model_points_bank
             )

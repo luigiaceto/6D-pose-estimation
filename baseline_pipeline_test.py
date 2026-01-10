@@ -10,10 +10,8 @@ from models.ResNetPose import ResNetPose
 from models.PinholeCamera import PinholeCamera
 
 from utils.pose_utils import (
-    compute_rotation_error, 
-    compute_translation_error,
-    batch_compute_add_metric, 
-    batch_compute_add_s_metric,
+    compute_ADD,
+    compute_ADDS,
     load_models_points, 
     quaternion_to_rotation_matrix,
     print_evaluation_results_table,
@@ -38,6 +36,7 @@ def evaluate_baseline_pipeline(
     num_points = N_POINTS_TO_LOAD
     print("Preloading mesh points for batch evaluation...")
     mesh_points_cache = load_models_points(dataset_root, num_points=num_points)
+
     # Spostiamo su GPU subito
     for k, v in mesh_points_cache.items():
         mesh_points_cache[k] = v.to(device)
@@ -72,8 +71,8 @@ def evaluate_baseline_pipeline(
         stats['total'] += 1
         
         # Essendo batch=1, prendiamo l'indice [0]
-        gt_R = batch["rotation"][0].cpu().numpy()
-        gt_t = batch["translation"][0].cpu().numpy()
+        gt_R = batch["rotation"][0].to(device)
+        gt_t = batch["translation"][0].cpu().to(device)
         gt_obj_id = int(batch["obj_id"][0])
         
         folder_id = int(batch['sample_id'][0][0])
@@ -127,6 +126,7 @@ def evaluate_baseline_pipeline(
             pred_R = quaternion_to_rotation_matrix(pred_q)[0].cpu().numpy()
 
         diameter = object_diameters[gt_obj_id]
+        batch_diam = torch.tensor([diameter], device=device)
         
         # Pinhole richiede bbox formato xyxy
         bbox_xyxy = torch.tensor([[x_tl, y_tl, x_tl+w, y_tl+h]], device=device)
@@ -137,23 +137,25 @@ def evaluate_baseline_pipeline(
         pred_z = pinhole.compute_depth_from_bbox(bbox_xyxy, batch_diam)
         pred_t = pinhole.unproject_2d_to_3d(center_2d, pred_z)[0].cpu().numpy()
 
+        pred_t_uns = pred_t.unsqueeze(-1)
+        gt_t_uns = gt_t.unsqueeze(-1)
+        
         # Carica punti modello (già cached su GPU)
-        model_points_np = mesh_points_cache[gt_obj_id].cpu().numpy()
-        
-        r_err = compute_rotation_error(pred_R, gt_R)
-        t_err = compute_translation_error(pred_t, gt_t)
-        
-        # Converti a batch format per le funzioni batch_compute_add_*
-        pred_R_torch = torch.from_numpy(pred_R).unsqueeze(0).to(device)  # (1, 3, 3)
-        pred_t_torch = torch.from_numpy(pred_t).unsqueeze(0).unsqueeze(-1).to(device)  # (1, 3, 1)
-        gt_R_torch = torch.from_numpy(gt_R).unsqueeze(0).to(device)  # (1, 3, 3)
-        gt_t_torch = torch.from_numpy(gt_t).unsqueeze(0).unsqueeze(-1).to(device)  # (1, 3, 1)
-        model_points_torch = torch.from_numpy(model_points_np).unsqueeze(0).to(device)  # (1, N, 3)
+        model_points = mesh_points_cache[gt_obj_id].unsqueeze(0)
         
         if gt_obj_id in SYMMETRIC_OBJECTS:
-            add_val = batch_compute_add_s_metric(pred_R_torch, pred_t_torch, gt_R_torch, gt_t_torch, model_points_torch).item() * 100  # cm
+            add_tensor = compute_ADDS(pred_R, gt_R, model_points, pred_t_uns, gt_t_uns)
         else:
-            add_val = batch_compute_add_metric(pred_R_torch, pred_t_torch, gt_R_torch, gt_t_torch, model_points_torch).item() * 100  # cm
+            add_tensor = compute_ADD(pred_R, gt_R, model_points, pred_t_uns, gt_t_uns)
+            
+        add_val = add_tensor.item() * 100.0 # Converti scalare a float python (cm)
+
+        R_diff = torch.matmul(pred_R.transpose(1, 2), gt_R)
+        trace = R_diff[0, 0, 0] + R_diff[0, 1, 1] + R_diff[0, 2, 2]
+        cos_theta = ((trace - 1) / 2.0).clamp(-1.0, 1.0)
+        r_err = torch.rad2deg(torch.acos(cos_theta)).item()
+
+        t_err = torch.norm(pred_t - gt_t).item() * 100.0
             
         per_class_metrics[gt_obj_id].append({
             'rotation': r_err, 'translation': t_err, 'add': add_val
