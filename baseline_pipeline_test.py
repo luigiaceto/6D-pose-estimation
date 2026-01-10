@@ -40,7 +40,6 @@ def evaluate_baseline_pipeline(
     # Spostiamo su GPU subito
     for k, v in mesh_points_cache.items():
         mesh_points_cache[k] = v.to(device)
-    print(f"Loaded {len(mesh_points_cache)} objects with {num_points} surface points each")
     
     object_diameters = test_dataset.get_object_diameters()
 

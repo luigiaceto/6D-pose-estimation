@@ -10,10 +10,9 @@ from models.TridentNetPose import TridentNetPose
 
 
 from utils.pose_utils import (
-    compute_rotation_error, 
-    compute_translation_error,
-    batch_compute_add_metric,
-    batch_compute_add_s_metric,
+    compute_rotation_error,
+    compute_ADD,
+    compute_ADDS,
     load_models_points, 
     quaternion_to_rotation_matrix,
     print_evaluation_results_table,
@@ -43,7 +42,17 @@ def evaluate_extension_pipeline(
     # Spostiamo su GPU subito
     for k, v in mesh_points_cache.items():
         mesh_points_cache[k] = v.to(device)
-    print(f"✅ Loaded {len(mesh_points_cache)} objects with {num_points} points each.")
+    print(f"Loaded {len(mesh_points_cache)} objects with {num_points} points each.")
+    
+    # Pre-build lookup tables per compute_rotation_error (efficienza)
+    max_id = max(mesh_points_cache.keys())
+    symmetry_lookup = torch.zeros(max_id + 1, dtype=torch.bool, device=device)
+    for obj_id in SYMMETRIC_OBJECTS:
+        symmetry_lookup[obj_id] = True
+    
+    model_points_bank = torch.zeros((max_id + 1, num_points, 3), device=device)
+    for k, v in mesh_points_cache.items():
+        model_points_bank[k] = v
 
     yolo = YOLO(yolo_checkpoint)
     
@@ -118,7 +127,7 @@ def evaluate_extension_pipeline(
 
         with torch.no_grad():
             # Forward pass: RGB + Depth + Box Info
-            pred_q, pred_t, _ = pose_model(rgb_batch, depth_batch, bbox_center_tensor, bbox_dims_tensor)
+            pred_q, pred_t = pose_model(rgb_batch, depth_batch, bbox_center_tensor, bbox_dims_tensor)
             pred_R = quaternion_to_rotation_matrix(pred_q) # (1, 3, 3)
 
         # Reshape translation per le funzioni batch (1, 3, 1)
@@ -127,16 +136,23 @@ def evaluate_extension_pipeline(
         
         # Recupera punti mesh dalla cache
         model_points_torch = mesh_points_cache[gt_obj_id].unsqueeze(0)  # (1, N, 3)
-        model_points_np = mesh_points_cache[gt_obj_id].cpu().numpy()    # Per compute_rotation_error
 
         if gt_obj_id in SYMMETRIC_OBJECTS:
-            add_val = batch_compute_add_s_metric(pred_R, pred_t_b, gt_R, gt_t_b, model_points_torch).item()  # METRI
+            add_val = compute_ADDS(pred_R, gt_R, model_points_torch, pred_t_b, gt_t_b).item()  # METRI
         else:
-            add_val = batch_compute_add_metric(pred_R, pred_t_b, gt_R, gt_t_b, model_points_torch).item()  # METRI
+            add_val = compute_ADD(pred_R, gt_R, model_points_torch, pred_t_b, gt_t_b).item()  # METRI
             
         add_cm = add_val * 100  # METRI -> CM
-        r_err = compute_rotation_error(pred_R[0].cpu().numpy(), gt_R[0].cpu().numpy(), gt_obj_id, model_points_np)
-        t_err = compute_translation_error(pred_t[0].cpu().numpy(), gt_t[0].cpu().numpy())  # METRI
+        
+        # Rotation error (usa nuova API batch)
+        gt_quat = batch["quaternion"].to(device)  # (1, 4)
+        class_id_tensor = torch.tensor([gt_obj_id], device=device)
+        r_err = compute_rotation_error(
+            pred_q, gt_quat, class_id_tensor, symmetry_lookup, model_points_bank
+        ).item()
+        
+        # Translation error (calcolo diretto)
+        t_err = torch.norm(pred_t - gt_t, p=2, dim=1).item() * 100  # METRI -> CM
         diameter = object_diameters[gt_obj_id]
         
         per_class_metrics[gt_obj_id].append({

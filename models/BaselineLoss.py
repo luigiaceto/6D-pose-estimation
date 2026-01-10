@@ -51,13 +51,15 @@ class BaselineLoss(nn.Module):
         Returns:
             dict con total_loss, metriche
         """
+        device = pred_quat.device
         
-        batch_points = self.model_points_bank[class_ids.long().cpu() ]  # (B, N, 3)
+        # Indicizzazione su CPU, poi sposta su GPU
+        batch_points = self.model_points_bank[class_ids.cpu().long()].to(device)  # (B, N, 3)
         pred_R = quaternion_to_rotation_matrix(pred_quat)  # (B, 3, 3)
         gt_R = quaternion_to_rotation_matrix(gt_quat)      # (B, 3, 3)
             
-        # symmetry mask
-        is_symmetric = self.symmetry_lookup[class_ids.long().cpu() ]  # (B,)
+        # symmetry mask (indicizzazione su CPU, risultato già bool)
+        is_symmetric = self.symmetry_lookup[class_ids.cpu().long()].to(device)  # (B,)
             
         loss_add = compute_ADD(pred_R, gt_R, batch_points)    # (B,) asymmetric
         loss_adds = compute_ADDS(pred_R, gt_R, batch_points)  # (B,) symmetric
