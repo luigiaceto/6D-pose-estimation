@@ -26,7 +26,12 @@ def train_one_epoch(
     model.z_head.train()
     model.offset_head.train()
     model.rot_head.train() 
-    model.depth_backbone.train()  
+    model.depth_backbone.train()
+    
+    # Bug #3 Fix: Se RGB backbone è stata sbloccata, mettila in train() mode
+    # (altrimenti BatchNorm usa statistiche ImageNet invece di aggiornarsi su LineMOD)
+    if model.rgb_backbone[0].weight.requires_grad:
+        model.rgb_backbone.train()  
 
     # Inizializzazione Accumulatori (solo loss geometriche)
     total_loss_sum = 0
@@ -44,25 +49,22 @@ def train_one_epoch(
         gt_translation = batch['translation'].to(device, non_blocking=True)
         bbox_center = batch['bbox_center_pixel'].to(device, non_blocking=True)
         cropped_depth = batch['cropped_depth'].to(device, non_blocking=True)
-        obj_id = batch['obj_id'].to(device, non_blocking=True).long()
+        obj_id = batch['obj_id'].to(device, non_blocking=True).long().view(-1)
         bbox_dims = batch['bbox_dims'].to(device, non_blocking=True)
         
         optimizer.zero_grad(set_to_none=True)
         
         with torch.amp.autocast(device_type='cuda', enabled=True):
-            # SCALING DEPTH: CNN vuole valori piccoli (mm -> m se necessario)
-            net_input_depth = cropped_depth / 1000.0
+            net_input_depth = cropped_depth.clone()
             
             # Setup camera intrinsics batch
             cam_k_batch = criterion.cam_k.repeat(len(obj_id), 1)
             
             # 1. PRE-CALCOLO Z GEOMETRIC PRIOR (usa bbox center come stima iniziale)
             z_prior_geom = compute_translation_from_depth_crop(
-                cropped_depth=cropped_depth,      # Depth RAW (non scalata)
+                cropped_depth=cropped_depth,      # Depth in METRI (già convertita dal dataset)
                 pred_uv=bbox_center,              # USA BBOX CENTER come prior
                 cam_k=cam_k_batch,
-                bbox_center=bbox_center,
-                bbox_dims=bbox_dims,
             )
             z_geometric = z_prior_geom[:, 2:3]  # (B, 1)
             
@@ -101,7 +103,7 @@ def train_one_epoch(
         proj_loss_sum += loss_dict['proj_loss'].item()
         trans_err_cm_sum += loss_dict['trans_err_cm'].item()
         proj_err_px_sum += loss_dict['proj_err_px'].item()
-        rot_err_deg_sum += loss_dict['rot_err_deg'] 
+        rot_err_deg_sum += loss_dict['rot_err_deg'].item()
     
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
@@ -145,18 +147,15 @@ def validate(
 
             with torch.amp.autocast(device_type='cuda', enabled=True):
                 net_input_depth = cropped_depth.clone()
-                net_input_depth = net_input_depth / 1000.0
                 
                 # Setup camera intrinsics batch
                 cam_k_batch = criterion.cam_k.repeat(len(obj_id), 1)
                 
                 # 1. PRE-CALCOLO Z GEOMETRIC PRIOR (usa bbox center come stima iniziale)
                 z_prior_geom = compute_translation_from_depth_crop(
-                    cropped_depth=cropped_depth,      # Depth RAW (non scalata)
+                    cropped_depth=cropped_depth,      # Depth in METRI (già convertita dal dataset)
                     pred_uv=bbox_center,              # USA BBOX CENTER come prior
                     cam_k=cam_k_batch,
-                    bbox_center=bbox_center,
-                    bbox_dims=bbox_dims,
                 )
                 z_geometric = z_prior_geom[:, 2:3]  # (B, 1)
                 
@@ -181,13 +180,13 @@ def validate(
                 )
             
             # logging (solo loss geometriche)
-            total_loss_sum += loss_dict['total_loss']
+            total_loss_sum += loss_dict['total_loss'].item()
             rot_loss_sum += loss_dict['rot_loss'].item()
             trans_loss_sum += loss_dict['trans_loss'].item()
             proj_loss_sum += loss_dict['proj_loss'].item()
             trans_err_cm_sum += loss_dict['trans_err_cm'].item()
             proj_err_px_sum += loss_dict['proj_err_px'].item()
-            rot_err_deg_sum += loss_dict['rot_err_deg']
+            rot_err_deg_sum += loss_dict['rot_err_deg'].item()
 
     avg_metrics = {
         'total_loss_avg': total_loss_sum / len(loader),
@@ -213,9 +212,9 @@ def train(
     weight_decay=1e-5,
     device='cuda',
     freeze_rgb_epochs=5,
-    rot_weight=10.0,     # float o tuple (start, end) - Centered ADD/ADD-S
-    trans_weight=100.0,  # float o tuple (start, end) - Pure Translation L1
-    proj_weight=2.0,     # float o tuple (start, end) - 2D Projection (opzionale)
+    rot_weight=10.0,      # float o tuple (start, end) - Centered ADD/ADD-S
+    trans_weight=10.0,  
+    proj_weight=1.0,      # float o tuple (start, end) - 2D Projection (opzionale)
     switch_epoch=40,     # Epoca in cui switchare i pesi (per Curriculum Learning)
     partial_unfreeze=False,
     resume_from_checkpoint=None,

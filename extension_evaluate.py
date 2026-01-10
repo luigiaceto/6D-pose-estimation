@@ -76,11 +76,9 @@ def evaluate_extension_batch(
             
             # 1. Calcola z geometricamente
             trans_geometric = compute_translation_from_depth_crop(
-                cropped_depth=depth,        # Tensore (B, 1, H, W) dal dataloader
+                cropped_depth=depth,        # Tensore (B, 1, H, W) dal dataloader in METRI
                 pred_uv=pred_uv,            # Centro (u,v) predetto dalla rete
                 cam_k=cam_k_batch,
-                bbox_center=bbox_center,
-                bbox_dims=bbox_dims,
             )
             
             # 2. Estrai Z e aggiungi correzione rete

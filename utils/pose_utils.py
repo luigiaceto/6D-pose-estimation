@@ -46,54 +46,62 @@ def yolo_to_xyxy(yolo_box, img_width, img_height):
     return [x1, y1, x2, y2]
 
 
-def compute_translation_from_depth_crop(cropped_depth, pred_uv, cam_k, bbox_center, bbox_dims):
+def compute_translation_from_depth_crop(cropped_depth, pred_uv, cam_k):
     """
-    Calcola la coordinata Z (depth) usando una ROBUST MEDIAN vettorizzata.
+    Calcola la coordinata Z (depth) usando un ROBUSTO PERCENTILE vettorizzato.
+    
+    Bug #2 Fix: Invece di campionare solo il centro fisso (che fallisce con jitter),
+    usa il 10° percentile dell'intero crop valido (assume l'oggetto sia la cosa più vicina).
     """
     B, _, H, W = cropped_depth.shape 
     
-    # --- Gestione Unità di misura ---
+    # --- 1. Gestione Unità di misura ---
     depth_m = cropped_depth.clone().detach()
     
-    # Controllo euristico sul batch (se mediana > 10.0, assumiamo mm -> m)
-    if depth_m.numel() > 0 and depth_m.median() > 10.0:
-        depth_m /= 1000.0
+    # Euristica batch-wise: se la mediana globale è alta, converti tutto
+    valid_vals = depth_m[depth_m > 0]
+    if valid_vals.numel() > 0 and valid_vals.median() > 10.0:
+        depth_m /= 1000.
         
-    # --- Sampling Centrale ---
-    # Kernel size adattivo: 15% della larghezza
-    k_size = int(W * 0.15) | 1 
-    center_start = (W // 2) - (k_size // 2)
-    center_end = center_start + k_size
+    # --- 2. Sampling Robusto su TUTTO il Crop (non solo centro) ---
+    # Bug #2 Fix: Con il jitter del bbox, l'oggetto può essere decentrato.
+    # Soluzione: Prendi il PERCENTILE dei valori più vicini (assume oggetto > background)
     
-    # (B, k_size*k_size)
-    flat_patch = depth_m[:, 0, center_start:center_end, center_start:center_end].reshape(B, -1)
+    # Flatten dell'intera depth map per ogni sample
+    flat_depth = depth_m[:, 0, :, :].reshape(B, -1)  # (B, H*W)
     
-    # --- Filtro Background e Outlier (Vettorizzato) ---
+    # --- 3. Filtro Background e Outlier (Vettorizzato con NaN) ---
     # Creiamo una maschera dei valori validi
-    valid_mask = (flat_patch > 0.05) & (flat_patch < 4.0)
+    valid_mask = (flat_depth > 0.05) & (flat_depth < 4.0)
     
-    # Copiamo la patch per inserire i NaN dove i valori non sono validi
-    patch_with_nans = flat_patch.clone()
-    patch_with_nans[~valid_mask] = float('nan')
+    # Sostituiamo i valori invalidi con NaN (Not a Number)
+    depth_with_nans = flat_depth.clone()
+    depth_with_nans[~valid_mask] = float('nan')
     
-    # --- Calcolo Mediana (ignora i NaN) ---
-    # torch.nanmedian restituisce (values, indices). A noi servono i values.
-    # Se una riga è tutta NaN, restituisce NaN.
-    z_finals = torch.nanmedian(patch_with_nans, dim=1).values
+    # --- 4. Calcolo Percentile Robusto (10% dei valori più vicini) ---
+    # Strategia: L'oggetto è tipicamente la cosa più vicina nel crop.
+    # Prendiamo il 10° percentile (ignora outlier come background lontano o pixel nulli)
     
-    # --- Fallback per righe completamente invalide ---
-    # Se z_finals contiene NaN, significa che per quel sample non c'erano valori validi nel centro
-    invalid_mask = torch.isnan(z_finals)
+    # Ordina i valori ignorando i NaN
+    sorted_depths = torch.sort(depth_with_nans, dim=1).values  # (B, H*W)
     
-    if invalid_mask.any():
-        # Fallback semplice: valore sicuro (0.5m)
-        # Nota: Qui potresti implementare la ricerca sull'intero crop se volessi, 
-        # ma vettorizzarla è complesso. Il fallback statico è solitamente sufficiente.
-        z_finals[invalid_mask] = 0.5 
+    # Calcola l'indice del 10° percentile
+    # Conta quanti valori validi ci sono per ogni sample
+    valid_counts = torch.sum(~torch.isnan(depth_with_nans), dim=1)  # (B,)
+    percentile_idx = (valid_counts * 0.10).long().clamp(min=0, max=H*W-1)  # 10° percentile
+    
+    # Estrai il valore del percentile per ogni batch
+    z_finals = sorted_depths[torch.arange(B), percentile_idx]
+    
+    # --- 5. Fallback per righe completamente invalide ---
+    invalid_batch_mask = torch.isnan(z_finals)
+    
+    if invalid_batch_mask.any():
+        z_finals[invalid_batch_mask] = 0.5 
 
     z_final = z_finals.unsqueeze(1) # (B, 1)
 
-    # --- Back-Projection ---
+    # --- 6. Back-Projection ---
     fx, fy = cam_k[:, 0], cam_k[:, 1]
     cx, cy = cam_k[:, 2], cam_k[:, 3]
     

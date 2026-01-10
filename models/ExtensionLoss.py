@@ -99,7 +99,7 @@ class ExtensionLoss(nn.Module):
         # LOSS COMPUTATION: PURE GEOMETRY (VECTORIZED)
         # ============================================
         
-        # --- L_rot: Centered ADD/ADD-S (rotation-only, no loop) ---
+        # --- L_rot: Centered ADD/ADD-S (rotation-only, optimized) ---
         batch_points = self.model_points_bank[class_ids.long()]  # (B, N, 3)
         pred_R = quaternion_to_rotation_matrix(pred_quat)  # (B, 3, 3)
         gt_R = quaternion_to_rotation_matrix(gt_quat)      # (B, 3, 3)
@@ -107,12 +107,31 @@ class ExtensionLoss(nn.Module):
         # Symmetry mask: True for symmetric objects (Eggbox, Glue)
         is_symmetric = self.symmetry_lookup[class_ids.long()]  # (B,)
         
-        # Compute both ADD and ADD-S for entire batch
-        loss_add = compute_add_rot_loss(pred_R, gt_R, batch_points)    # (B,) asymmetric
-        loss_adds = compute_adds_rot_loss(pred_R, gt_R, batch_points)  # (B,) symmetric
+        # Bug #7 Fix: Compute losses only for relevant objects using masking
+        # This avoids expensive O(N²) cdist computation for asymmetric objects
+        loss_rot_values = torch.zeros(len(class_ids), device=device)
         
-        # Select correct loss per sample using boolean mask
-        loss_rot = torch.where(is_symmetric, loss_adds, loss_add).mean()
+        # Compute ADD for asymmetric objects only
+        if (~is_symmetric).any():
+            asym_mask = ~is_symmetric
+            loss_add = compute_add_rot_loss(
+                pred_R[asym_mask], 
+                gt_R[asym_mask], 
+                batch_points[asym_mask]
+            )
+            loss_rot_values[asym_mask] = loss_add
+        
+        # Compute ADD-S for symmetric objects only (more expensive due to cdist)
+        if is_symmetric.any():
+            sym_mask = is_symmetric
+            loss_adds = compute_adds_rot_loss(
+                pred_R[sym_mask], 
+                gt_R[sym_mask], 
+                batch_points[sym_mask]
+            )
+            loss_rot_values[sym_mask] = loss_adds
+        
+        loss_rot = loss_rot_values.mean()
         
         # --- L_trans: Pure Translation L1 (in METERS) ---
         loss_trans = F.l1_loss(pred_trans, gt_trans)

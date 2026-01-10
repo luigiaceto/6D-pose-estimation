@@ -254,21 +254,26 @@ class CustomDatasetPose(Dataset):
         x_new = center_x_new - w_new / 2
         y_new = center_y_new - h_new / 2
         
-        # clamping (sicurezza bordi)
-        x_new = max(0, min(x_new, img_width - 1))
-        y_new = max(0, min(y_new, img_height - 1))
+        # Bug #6 Fix: Instead of clamping dimensions (which changes aspect ratio),
+        # shift the box to keep it within bounds while preserving size.
+        # The _crop_and_pad_image method will handle padding with black pixels.
         
-        available_w = img_width - x_new
-        available_h = img_height - y_new
+        # Se il box esce dai bordi, lo shiftiamo all'interno
+        if x_new < 0:
+            x_new = 0
+        elif x_new + w_new > img_width:
+            x_new = max(0, img_width - w_new)
+            
+        if y_new < 0:
+            y_new = 0
+        elif y_new + h_new > img_height:
+            y_new = max(0, img_height - h_new)
         
-        w_new = min(w_new, available_w)
-        h_new = min(h_new, available_h)
-        
-        # check finale
-        if w_new > 1 and h_new > 1:
-            return (x_new, y_new, w_new, h_new)
-        else:
+        # Valida dimensioni minime (se il box è troppo grande per l'immagine, usa l'originale)
+        if w_new > img_width or h_new > img_height or w_new < 1 or h_new < 1:
             return bbox  # fallback al bbox originale
+            
+        return (x_new, y_new, w_new, h_new)
 
     def _crop_and_pad_image(self, img, bbox, resample=Image.BILINEAR):
         """

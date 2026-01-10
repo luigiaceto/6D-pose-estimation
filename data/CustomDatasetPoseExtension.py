@@ -35,9 +35,15 @@ class RGBDDatasetPose(CustomDatasetPose):
             scale_factor = torch.empty(1).uniform_(0.99, 1.01).item()
             depth_tensor = depth_tensor * scale_factor
 
+            # Bug #3 Fix: Applica rumore SOLO dove c'è l'oggetto (depth > 0)
+            # Evita di "sporcare" lo sfondo con valori piccoli non nulli
+            valid_mask = depth_tensor > 0
             noise = torch.randn_like(depth_tensor) * 0.003  # +/- 3mm di rumore
-            mask = torch.rand_like(depth_tensor) > 0.03     # 3% dei pixel persi
-            depth_tensor = (depth_tensor + noise) * mask
+            depth_tensor[valid_mask] += noise[valid_mask]   # Somma solo sui pixel validi
+            
+            # Poi applica dropout (3% dei pixel persi)
+            dropout_mask = torch.rand_like(depth_tensor) > 0.03
+            depth_tensor = depth_tensor * dropout_mask
 
         depth_tensor = depth_tensor.unsqueeze(0) # Aggiungi canale: (1, 224, 224)
         
