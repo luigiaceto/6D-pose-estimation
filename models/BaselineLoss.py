@@ -72,8 +72,11 @@ class BaselineLoss(nn.Module):
             trans_error_m = torch.mean(torch.norm(pred_trans - gt_trans, dim=1))
             trans_error_cm = trans_error_m * 100  # metri -> cm
             rot_err_deg = compute_rotation_error(
-                pred_quat, gt_quat, class_ids, 
-                self.symmetry_lookup, self.model_points_bank
+                pred_quat, 
+                gt_quat, 
+                class_ids.cpu(), 
+                self.symmetry_lookup, 
+                self.model_points_bank
             )
         
         return {
