@@ -30,7 +30,7 @@ def evaluate_baseline(
 ):
     
     model = ResNetPose().to(device)
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
     
@@ -92,7 +92,7 @@ def evaluate_baseline(
             pred_quaternion = model(cropped_img)  # (B, 4)
             pred_rotation_matrix = quaternion_to_rotation_matrix(pred_quaternion)
             
-            batch_points = point_bank[obj_ids]
+            batch_points = point_bank[obj_ids]  # (B, N, 3)
             
             # Reshape per batch functions: (B, 3) -> (B, 3, 1)
             pred_t_batch = pred_trans.unsqueeze(-1)
