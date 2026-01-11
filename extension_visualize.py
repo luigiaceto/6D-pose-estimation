@@ -200,9 +200,9 @@ def visualize_fusion_predictions(
             
             # --- E. Inference con back-projection interna ---
             with torch.no_grad():
-                # Forward Pass: RGB + Depth + Center -> Quaternion + Translation
-                # (z_geometric calcolato internamente dal modello)
-                pred_quat, pred_trans = pose_model(
+                # Forward Pass: RGB + Depth + Center -> Quaternion + Translation + UV
+                # (z_geometric calcolato internamente dal modello, pred_uv predetto)
+                pred_quat, pred_trans, _ = pose_model(
                     tensor_rgb, 
                     tensor_depth, 
                     tensor_center, 

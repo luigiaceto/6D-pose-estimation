@@ -49,7 +49,7 @@ class ExtensionLoss(nn.Module):
         self.w_trans = trans_weight
         self.w_proj = proj_weight
 
-    def forward(self, pred_quat, pred_trans, gt_quat, gt_trans, class_ids):
+    def forward(self, pred_quat, pred_trans, gt_quat, gt_trans, class_ids, pred_uv):
         """
         Loss geometrica 3D + 2D: confronta rotation, translation 3D e proiezione 2D.
         
@@ -59,6 +59,7 @@ class ExtensionLoss(nn.Module):
             gt_quat: (B, 4) - Ground truth quaternion
             gt_trans: (B, 3) - Ground truth translation in metri [x, y, z]
             class_ids: (B,) - Object class IDs
+            pred_uv: (B, 2) - Predicted pixel coordinates [u, v]
         
         Returns:
             dict: {
@@ -73,17 +74,13 @@ class ExtensionLoss(nn.Module):
         """
         device = pred_quat.device
         
-        # STEP 1: Compute 2D projections 
+        # STEP 1: Compute GT 2D projection (disaccoppiato da pred_trans)
         # Clamp depth per evitare divisioni per zero
-        pred_trans_safe = pred_trans.clone()
-        pred_trans_safe[:, 2] = torch.clamp(pred_trans[:, 2], min=0.01)
-        
         gt_trans_safe = gt_trans.clone()
         gt_trans_safe[:, 2] = torch.clamp(gt_trans[:, 2], min=0.01)
         
-        # Proiezione 3D → 2D
-        pred_2d = self.pinhole.project_3d_to_2d(pred_trans_safe)  # (B, 2)
-        gt_2d = self.pinhole.project_3d_to_2d(gt_trans_safe)      # (B, 2)
+        # Proiezione GT 3D → 2D
+        gt_uv = self.pinhole.project_3d_to_2d(gt_trans_safe)  # (B, 2)
         
         # STEP 2: LOSS COMPUTATION
         
@@ -122,8 +119,9 @@ class ExtensionLoss(nn.Module):
         # --- L_trans: Pure Translation L1 (in METERS) ---
         loss_trans = F.l1_loss(pred_trans, gt_trans)
         
-        # --- L_proj: 2D Projection (regolarizzazione) ---
-        loss_proj = F.smooth_l1_loss(pred_2d, gt_2d, beta=1.0)
+        # --- L_proj: 2D Projection (regolarizzazione, disaccoppiata) ---
+        # Usa direttamente pred_uv vs gt_uv (nessuna proiezione di pred_trans)
+        loss_proj = F.smooth_l1_loss(pred_uv, gt_uv, beta=1.0)
 
         # TOTAL LOSS
         total_loss = (
@@ -135,7 +133,7 @@ class ExtensionLoss(nn.Module):
         # METRICS FOR LOGGING
         with torch.no_grad():
             trans_err_cm = torch.norm(pred_trans - gt_trans, p=2, dim=1).mean() * 100
-            proj_err_px = torch.norm(pred_2d - gt_2d, p=2, dim=1).mean()
+            proj_err_px = torch.norm(pred_uv - gt_uv, p=2, dim=1).mean()
             # Rotation error (handles symmetric/asymmetric automatically)
             rot_err_deg = compute_rotation_error(
                 pred_quat, gt_quat, class_ids, 

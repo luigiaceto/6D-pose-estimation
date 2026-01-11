@@ -126,8 +126,8 @@ def evaluate_extension_pipeline(
             continue
 
         with torch.no_grad():
-            # Forward pass: RGB + Depth + Box Info
-            pred_q, pred_t = pose_model(rgb_batch, depth_batch, bbox_center_tensor, bbox_dims_tensor)
+            # Forward pass: RGB + Depth + Box Info (modello restituisce anche pred_uv)
+            pred_q, pred_t, _ = pose_model(rgb_batch, depth_batch, bbox_center_tensor, bbox_dims_tensor)
             pred_R = quaternion_to_rotation_matrix(pred_q) # (1, 3, 3)
 
         # Reshape translation per le funzioni batch (1, 3, 1)

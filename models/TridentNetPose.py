@@ -144,7 +144,8 @@ class TridentNetPose(nn.Module):
         
         # --- Feature Extraction ---
         rgb_feat = self.rgb_backbone(rgb).view(rgb.size(0), -1)     # (B, 2048)
-        depth_feat = self.depth_backbone(depth)                     # (B, 512)
+        depth_centered = depth - z_geometric.view(-1, 1, 1, 1)
+        depth_feat = self.depth_backbone(depth_centered)                     # (B, 512)
         
         # --- Fusion ---
         fused = torch.cat([rgb_feat, depth_feat, bbox_dims], dim=1) # (B, 2562)
@@ -178,7 +179,7 @@ class TridentNetPose(nn.Module):
             intrinsics=self.cam_k  # (1, 4)
         )  # Restituisce (B, 3)
         
-        return pred_quat, pred_trans
+        return pred_quat, pred_trans, pred_uv
 
     def freeze_rgb(self):
         for param in self.rgb_backbone.parameters():

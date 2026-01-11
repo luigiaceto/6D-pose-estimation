@@ -19,14 +19,17 @@ def train_one_epoch(
 
     model.eval() 
     
+    # Safe attribute access per DataParallel
+    real_model = model.module if hasattr(model, "module") else model
+    
     # 2. Sblocca le parti che devono imparare (Training Mode)
     #    - fusion_fc, z_head, offset_head, rot_head: Hanno Dropout -> Serve .train()
     #    - depth_backbone: Ha BatchNorm nuove -> Serve .train() per calcolare le statistiche!
-    model.fusion_fc.train()
-    model.z_head.train()
-    model.offset_head.train()
-    model.rot_head.train() 
-    model.depth_backbone.train() 
+    real_model.fusion_fc.train()
+    real_model.z_head.train()
+    real_model.offset_head.train()
+    real_model.rot_head.train() 
+    real_model.depth_backbone.train() 
 
     # Inizializzazione Accumulatori (loss geometriche 3D + 2D)
     total_loss_sum = 0
@@ -51,20 +54,21 @@ def train_one_epoch(
         
         with torch.amp.autocast(device_type='cuda', enabled=True):
             # Forward (z_geometric calcolato internamente dal modello)
-            pred_quat, pred_trans = model(
+            pred_quat, pred_trans, pred_uv = model(
                 cropped_img, 
                 cropped_depth, 
                 bbox_center, 
                 bbox_dims
             )
             
-            # Calcola loss geometrica 3D + 2D
+            # Calcola loss geometrica 3D + 2D (con pred_uv disaccoppiato)
             loss_dict = criterion(
                 pred_quat=pred_quat, 
                 pred_trans=pred_trans,
                 gt_quat=gt_quaternion, 
                 gt_trans=gt_translation, 
-                class_ids=obj_id
+                class_ids=obj_id,
+                pred_uv=pred_uv
             )
 
             loss = loss_dict['total_loss']
@@ -126,20 +130,21 @@ def validate(
 
             with torch.amp.autocast(device_type='cuda', enabled=True):
                 # Forward (z_geometric calcolato internamente dal modello)
-                pred_quat, pred_trans = model(
+                pred_quat, pred_trans, pred_uv = model(
                     cropped_img, 
                     cropped_depth, 
                     bbox_center, 
                     bbox_dims
                 )
                 
-                # Calcola loss geometrica 3D + 2D
+                # Calcola loss geometrica 3D + 2D (con pred_uv disaccoppiato)
                 loss_dict = criterion(
                     pred_quat=pred_quat, 
                     pred_trans=pred_trans,
                     gt_quat=gt_quaternion, 
                     gt_trans=gt_translation, 
-                    class_ids=obj_id
+                    class_ids=obj_id,
+                    pred_uv=pred_uv
                 )
             
             # logging (loss geometriche 3D + 2D)
@@ -197,6 +202,14 @@ def train(
     model = TridentNetPose(
         cam_k=cam_k
     ).to(device)
+    
+    # Multi-GPU support con DataParallel
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs with DataParallel!")
+        model = torch.nn.DataParallel(model)
+    
+    # Safe attribute access per DataParallel
+    real_model = model.module if hasattr(model, "module") else model
 
     criterion = ExtensionLoss(
         rot_weight=rot_weight,
@@ -207,12 +220,12 @@ def train(
     ).to(device)
 
     params = [
-        {'params': model.rgb_backbone.parameters(), 'lr': lr_rgb_backbone},
-        {'params': model.depth_backbone.parameters(), 'lr': lr_new_components},
-        {'params': model.fusion_fc.parameters(), 'lr': lr_new_components},
-        {'params': model.rot_head.parameters(), 'lr': lr_new_components},
-        {'params': model.z_head.parameters(), 'lr': lr_new_components},
-        {'params': model.offset_head.parameters(), 'lr': lr_new_components}
+        {'params': real_model.rgb_backbone.parameters(), 'lr': lr_rgb_backbone},
+        {'params': real_model.depth_backbone.parameters(), 'lr': lr_new_components},
+        {'params': real_model.fusion_fc.parameters(), 'lr': lr_new_components},
+        {'params': real_model.rot_head.parameters(), 'lr': lr_new_components},
+        {'params': real_model.z_head.parameters(), 'lr': lr_new_components},
+        {'params': real_model.offset_head.parameters(), 'lr': lr_new_components}
     ]
 
     optimizer = optim.AdamW(
@@ -251,7 +264,7 @@ def train(
     
     print("Mixed Precision (AMP): ENABLED")
 
-    model.freeze_rgb()
+    real_model.freeze_rgb()
     
     for epoch in range(start_epoch, epochs):
         print(f"\nEpoch {epoch+1}/{epochs}")
@@ -264,9 +277,9 @@ def train(
             print("Warning: No trainable parameters!")
 
         if epoch < freeze_rgb_epochs:
-            model.freeze_rgb()
+            real_model.freeze_rgb()
         elif epoch == freeze_rgb_epochs:
-            model.unfreeze_rgb()  # Partial unfreeze (solo layer4)
+            real_model.unfreeze_rgb()  # Partial unfreeze (solo layer4)
             optimizer.param_groups[0]['lr'] = lr_rgb_backbone
             print(f" RGB Backbone Unfrozen - Partial (layer4 only) | LR reset to {lr_rgb_backbone:.2e}")
             
@@ -292,7 +305,7 @@ def train(
             
             checkpoint_dict = {
                 'epoch': epoch + 1,
-                'model_state_dict': model.state_dict(),
+                'model_state_dict': real_model.state_dict(),  # Usa real_model per evitare prefisso module.
                 'optimizer_state_dict': optimizer.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
                 'scaler_state_dict': scaler.state_dict(),
