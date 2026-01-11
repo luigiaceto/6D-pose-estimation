@@ -11,6 +11,7 @@ from models.TridentNetPose import TridentNetPose
 
 from utils.pose_utils import (
     compute_rotation_error,
+    compute_translation_error,
     compute_ADD,
     compute_ADDS,
     load_models_points, 
@@ -37,12 +38,10 @@ def evaluate_extension_pipeline(
     object_diameters = test_dataset.get_object_diameters()
     
     num_points = N_POINTS_TO_LOAD
-    print(f"Preloading mesh points for GPU evaluation (num_points={num_points})...")
-    mesh_points_cache = load_models_points(dataset_root, num_points=num_points)
+    mesh_points_cache = load_models_points(dataset_root)
     # Spostiamo su GPU subito
     for k, v in mesh_points_cache.items():
         mesh_points_cache[k] = v.to(device)
-    print(f"Loaded {len(mesh_points_cache)} objects with {num_points} points each.")
     
     # Pre-build lookup tables per compute_rotation_error (efficienza)
     max_id = max(mesh_points_cache.keys())
@@ -75,10 +74,10 @@ def evaluate_extension_pipeline(
     for batch in tqdm(test_loader, desc="Testing Extension Pipeline"):
         stats['total'] += 1
         
-        # Batch size 1 -> prendiamo indice [0]
-        gt_R = batch["rotation"].to(device)       # (1, 3, 3)
-        gt_t = batch["translation"].to(device)    # (1, 3)
-        gt_obj_id = int(batch["obj_id"][0])
+        # Batch size 1 -> prendiamo indice [0] solo per obj_id
+        gt_R = batch["rotation"].to(device)       # (1, 3, 3) - keep batch dim!
+        gt_t = batch["translation"].to(device)    # (1, 3) - keep batch dim!
+        gt_obj_id = int(batch["obj_id"][0])       # scalar
         
         folder_id = int(batch['sample_id'][0][0])
         sample_id = int(batch['sample_id'][0][1])
@@ -144,15 +143,15 @@ def evaluate_extension_pipeline(
             
         add_cm = add_val * 100  # METRI -> CM
         
-        # Rotation error (usa nuova API batch)
+        # Rotation error
         gt_quat = batch["quaternion"].to(device)  # (1, 4)
-        class_id_tensor = torch.tensor([gt_obj_id], device=device)
+        class_id_tensor = torch.tensor([gt_obj_id], device=device, dtype=torch.long)
         r_err = compute_rotation_error(
             pred_q, gt_quat, class_id_tensor, symmetry_lookup, model_points_bank
         )[0].item()  # Extract first element from (1,) tensor
         
-        # Translation error (calcolo diretto)
-        t_err = torch.norm(pred_t - gt_t, p=2, dim=1).item() * 100  # METRI -> CM
+        # Translation error
+        t_err = compute_translation_error(pred_t, gt_t).item()
         diameter = object_diameters[gt_obj_id]
         
         per_class_metrics[gt_obj_id].append({

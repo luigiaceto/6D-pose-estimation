@@ -4,7 +4,6 @@ __pycache__
 domande.md
 datasets/
 runs/
-checkpoints/best_pose_model.pt
-checkpoints/best_model_letterbox.pt
-checkpoints/best_fusion_model.pt
+checkpoints/best_baseline_model.pt
+checkpoints/best_extension_model.pt
 appunti.md

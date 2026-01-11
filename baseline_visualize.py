@@ -8,8 +8,6 @@ import cv2
 import numpy as np
 import torch
 import yaml
-import os
-import re
 from ultralytics import YOLO
 import matplotlib.pyplot as plt
 import torchvision.transforms as transforms
@@ -18,80 +16,47 @@ from models.ResNetPose import ResNetPose
 from models.PinholeCamera import PinholeCamera
 from utils.pose_utils import (
     quaternion_to_rotation_matrix, 
-    YOLO_TO_LINEMOD_MAP,
-    compute_rotation_error,         
-    compute_translation_error,
-    load_models_points,
-    N_POINTS_TO_LOAD,
-    SYMMETRIC_OBJECTS
+    YOLO_TO_LINEMOD_MAP
 )
 from utils.visualization import draw_3d_bbox_colored, draw_axis_colored 
 
-def visualize_baseline_predictions(
+def visualize_baseline(
     dataset_root,
     cam_k,
     test_dataset=None,
-    sample_idx=None,
-    image_path=None,
     yolo_checkpoint=str(Path("checkpoints") / "best_yolo_model.pt"),
     model_checkpoint=str(Path("checkpoints") / "best_pose_model.pt"),
     device='cuda',
-    figsize=(12, 8),
+    figsize=(18, 6),
     img_mean=[0.485, 0.456, 0.406],
     img_std=[0.229, 0.224, 0.225]
 ):
     """
-    Pipeline completa: YOLO -> Crop+Padding -> ResNet -> Visualizza GT e predizione con confronto numerico.
+    Pipeline completa: YOLO -> Crop+Padding -> ResNet -> Visualizza GT e predizione.
+    Mostra 3 immagini casuali dal test set in un unico plot.
     
     Args:
         test_dataset: Dataset di test per selezionare campioni validi
-        sample_idx: Indice specifico dal test set (se None, selezione casuale)
-        image_path: Path manuale dell'immagine (deprecato, usa test_dataset)
+        num_samples: Numero di immagini da visualizzare (default: 3)
     """
+    num_samples = 3
+
+    if test_dataset is None:
+        raise ValueError("Devi fornire 'test_dataset'.")
     
-    if test_dataset is not None:
-        test_samples = test_dataset.get_samples_id()
-        
-        if sample_idx is not None:
-            # Usa sample specifico dal test set
-            if sample_idx < 0 or sample_idx >= len(test_samples):
-                raise ValueError(f"sample_idx {sample_idx} fuori range. Test set ha {len(test_samples)} samples.")
-            folder_id, sample_id = test_samples[sample_idx]
-        else:
-            # Selezione casuale dal test set
-            folder_id, sample_id = test_samples[np.random.randint(len(test_samples))]
-        
-        image_path = str(dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png")
-        print(f"📊 Visualizzando sample dal TEST SET: folder {folder_id:02d}, image {sample_id:04d}")
+    # Seleziona 3 sample casuali dal test set
+    test_samples = test_dataset.get_samples_id()
+    random_indices = np.random.choice(len(test_samples), size=num_samples, replace=False)
     
-    elif image_path is None:
-        raise ValueError("Devi fornire 'test_dataset' oppure 'image_path'.")
+    selected_samples = [test_samples[idx] for idx in random_indices]
     
-    else:
-        # Warning: path manuale
-        print("  ATTENZIONE: image_path fornito manualmente. Impossibile verificare se è nel test set.")
-        print("  Raccomandazione: usa 'test_dataset' per garantire selezione dal test set.")
-    
+    # Load model info and models
     models_info_path = str(dataset_root / "models" / "models_info.yml")
     with open(models_info_path, 'r') as f:
         models_info = yaml.load(f, Loader=yaml.CLoader)
     object_diameters = {obj_id: info['diameter'] for obj_id, info in models_info.items()}
     
-    # Carichiamo nuvole punti e creiamo tensori per GPU (Batch Logic)
-    num_points = N_POINTS_TO_LOAD
-    mesh_points_cache = load_models_points(dataset_root, num_points=num_points)
-    
-    max_obj_id = max(mesh_points_cache.keys())
-    all_models_tensor = torch.zeros((max_obj_id + 1, num_points, 3), device=device, dtype=torch.float32)
-    for oid, points in mesh_points_cache.items():
-        all_models_tensor[oid] = points.to(device)
-        
-    # Lookup Table Simmetria
-    symmetry_lookup = torch.zeros(max_obj_id + 1, dtype=torch.bool, device=device)
-    for sym_id in SYMMETRIC_OBJECTS:
-        if sym_id <= max_obj_id:
-            symmetry_lookup[sym_id] = True
-    
+    # Load YOLO and Pose models
     yolo_model = YOLO(yolo_checkpoint)
     
     checkpoint = torch.load(model_checkpoint, map_location=device, weights_only=False)
@@ -103,174 +68,105 @@ def visualize_baseline_predictions(
     
     transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize(
-            mean=img_mean,
-            std=img_std
-        )
+        transforms.Normalize(mean=img_mean, std=img_std)
     ])
     
-    img = cv2.imread(image_path)
-    if img is None:
-        raise FileNotFoundError(f"Immagine non trovata: {image_path}")
-
-    match = re.search(r'data[/\\](\d+)[/\\]rgb[/\\](\d+)\.png', image_path)
-    if not match:
-        raise ValueError(f"Path immagine non valido: {image_path}")
+    # Process each selected sample
+    processed_images = []
     
-    obj_folder = match.group(1)
-    img_name = match.group(2)
-    
-    gt_file = image_path.replace(
-        str(Path("data") / f"{obj_folder}" / "rgb" / f"{img_name}.png"),
-        f'{obj_folder}_gt.yml'
-    )
-    
-    with open(gt_file, 'r') as f:
-        gt_data = yaml.load(f, Loader=yaml.CLoader)
-    
-    results = yolo_model(image_path, verbose=False)
-    
-    print("\n" + "="*70)
-    print(f"VISUALIZATION: {os.path.basename(image_path)}")
-    print("="*70)
-    
-    for result in results:
-        boxes = result.boxes
+    for folder_id, sample_id in selected_samples:
+        image_path = str(dataset_root / "data" / f"{folder_id:02d}" / "rgb" / f"{sample_id:04d}.png")
         
-        for i in range(len(boxes)):
-            # Bounding box extraction
-            bbox = boxes.xywh[i].cpu().numpy()
-            x_c, y_c, w, h = bbox
-            x_min = int(x_c - w/2)
-            y_min = int(y_c - h/2)
-            x_max = int(x_c + w/2)
-            y_max = int(y_c + h/2)
+        img = cv2.imread(image_path)
+        if img is None:
+            print(f"Skipping {image_path} - not found")
+            continue
+        
+        # Load ground truth
+        gt_file = str(dataset_root / f"{folder_id:02d}_gt.yml")
+        with open(gt_file, 'r') as f:
+            gt_data = yaml.load(f, Loader=yaml.CLoader)
+        
+        # YOLO inference
+        results = yolo_model(image_path, verbose=False)
+        
+        for result in results:
+            boxes = result.boxes
             
-            # Crop handling
-            x_min = max(0, x_min)
-            y_min = max(0, y_min)
-            x_max = min(img.shape[1], x_max)
-            y_max = min(img.shape[0], y_max)
-            
-            cropped = img[y_min:y_max, x_min:x_max]
-            if cropped.size == 0:
-                continue
-            
-            # Converti in PIL RGB
-            cropped_rgb = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB)
-            cropped_pil = Image.fromarray(cropped_rgb)
+            for i in range(len(boxes)):
+                # Bounding box extraction
+                bbox = boxes.xywh[i].cpu().numpy()
+                x_c, y_c, w, h = bbox
+                x_min = int(x_c - w/2)
+                y_min = int(y_c - h/2)
+                x_max = int(x_c + w/2)
+                y_max = int(y_c + h/2)
+                
+                # Crop handling
+                x_min = max(0, x_min)
+                y_min = max(0, y_min)
+                x_max = min(img.shape[1], x_max)
+                y_max = min(img.shape[0], y_max)
+                
+                # Usa il metodo del dataset per crop e padding
+                img_pil = Image.open(image_path).convert("RGB")
+                bbox_xywh = (x_min, y_min, x_max - x_min, y_max - y_min)
+                
+                if bbox_xywh[2] <= 0 or bbox_xywh[3] <= 0:
+                    continue
+                
+                # Crop e pad usando il metodo del dataset
+                preprocessed_img = test_dataset._crop_and_pad_image(img_pil, bbox_xywh, resample=Image.BILINEAR)
+                cropped_tensor = transform(preprocessed_img).unsqueeze(0).to(device)
 
-            # LETTERBOX PADDING
-            w_crop, h_crop = cropped_pil.size
-            max_dim = max(w_crop, h_crop)
-
-            # Creiamo una nuova immagine quadrata nera
-            square_img = Image.new('RGB', (max_dim, max_dim), (0, 0, 0))
-
-            # Calcoliamo offset per centrare l'immagine
-            offset_x = (max_dim - w_crop) // 2
-            offset_y = (max_dim - h_crop) // 2
-            
-            # Incolliamo l'immagine al centro
-            square_img.paste(cropped_pil, (offset_x, offset_y))
-            
-            # Resize alla dimensione di input della ResNet (224x224) 
-            final_input = square_img.resize((224, 224), Image.BILINEAR)
-            
-            cropped_tensor = transform(final_input).unsqueeze(0).to(device)
-
-            # Predict quaternion
-            with torch.no_grad():
-                pred_quaternion = pose_model(cropped_tensor)
-            
-            # Calculate translation
-            class_id = int(boxes.cls[i])
-            obj_id = YOLO_TO_LINEMOD_MAP[class_id]
-            diameter = object_diameters[obj_id]
-            
-            bbox_xyxy = torch.tensor([[x_min, y_min, x_max, y_max]], device=device, dtype=torch.float32)
-            center_2d = torch.tensor([[(x_min + x_max) / 2, (y_min + y_max) / 2]], device=device)
-            batch_diam = torch.tensor([diameter], device=device)
-            
-            depth = pinhole.compute_depth_from_bbox(bbox_xyxy, batch_diam)
-            pred_trans_tensor = pinhole.unproject_2d_to_3d(center_2d, depth) # (1, 3)
-            
-            # Convert to Numpy for Drawing
-            pred_translation = pred_trans_tensor[0].cpu().numpy()
-            pred_rotation = quaternion_to_rotation_matrix(pred_quaternion)[0].cpu().numpy()
-            pred_quat_np = pred_quaternion[0].cpu().numpy()
-            
-            # Estrazione ground truth per questa immagine
-            img_idx = int(img_name)
-            if img_idx in gt_data:
-                gt_info = gt_data[img_idx][0]  
-                gt_rotation = np.array(gt_info['cam_R_m2c']).reshape(3, 3)
-                gt_translation = np.array(gt_info['cam_t_m2c']) / 1000.0  
-                gt_quat = np.array(gt_info['quaternion'])
+                # Predict quaternion
+                with torch.no_grad():
+                    pred_quaternion = pose_model(cropped_tensor)
                 
-                # Draw GROUND TRUTH
-                img = draw_3d_bbox_colored(img, gt_rotation, gt_translation, cam_k, obj_id, models_info, color=(0, 255, 0))
-                img = draw_axis_colored(img, gt_rotation, gt_translation, cam_k, scale=0.05, colors=[(0, 200, 0), (0, 255, 0), (0, 180, 0)])
+                # Calculate translation
+                class_id = int(boxes.cls[i])
+                obj_id = YOLO_TO_LINEMOD_MAP[class_id]
+                diameter = object_diameters[obj_id]
                 
-                # Draw PREDICTION 
-                img = draw_3d_bbox_colored(img, pred_rotation, pred_translation, cam_k, obj_id, models_info, color=(255, 165, 0))
-                img = draw_axis_colored(img, pred_rotation, pred_translation, cam_k, scale=0.05, colors=[(255, 100, 0), (255, 165, 0), (200, 130, 0)])
+                bbox_xyxy = torch.tensor([[x_min, y_min, x_max, y_max]], device=device, dtype=torch.float32)
+                center_2d = torch.tensor([[(x_min + x_max) / 2, (y_min + y_max) / 2]], device=device)
+                batch_diam = torch.tensor([diameter], device=device)
                 
-                # Print confronto numerico
-                print(f"\n Object {obj_id} (Class {class_id})")
-                print(f"\n GROUND TRUTH:")
-                print(f"     Translation: [{gt_translation[0]:7.4f}, {gt_translation[1]:7.4f}, {gt_translation[2]:7.4f}] m")
-                print(f"     Quaternion:  [{gt_quat[0]:7.4f}, {gt_quat[1]:7.4f}, {gt_quat[2]:7.4f}, {gt_quat[3]:7.4f}]")
+                depth = pinhole.compute_depth_from_bbox(bbox_xyxy, batch_diam)
+                pred_trans_tensor = pinhole.unproject_2d_to_3d(center_2d, depth)
                 
-                print(f"\n PREDICTION:")
-                print(f"     Translation: [{pred_translation[0]:7.4f}, {pred_translation[1]:7.4f}, {pred_translation[2]:7.4f}] m")
-                print(f"     Quaternion:  [{pred_quat_np[0]:7.4f}, {pred_quat_np[1]:7.4f}, {pred_quat_np[2]:7.4f}, {pred_quat_np[3]:7.4f}]")
+                # Convert to Numpy for Drawing
+                pred_translation = pred_trans_tensor[0].cpu().numpy()
+                pred_rotation = quaternion_to_rotation_matrix(pred_quaternion)[0].cpu().numpy()
                 
-                # Calcola IoU del bounding box
-                gt_bbox = gt_info['obj_bb'] 
-                gt_x1, gt_y1, gt_w, gt_h = gt_bbox
-                gt_x2, gt_y2 = gt_x1 + gt_w, gt_y1 + gt_h
-                
-                # Calcola intersezione
-                x1_inter = max(x_min, gt_x1)
-                y1_inter = max(y_min, gt_y1)
-                x2_inter = min(x_max, gt_x2)
-                y2_inter = min(y_max, gt_y2)
-                
-                if x2_inter > x1_inter and y2_inter > y1_inter:
-                    intersection = (x2_inter - x1_inter) * (y2_inter - y1_inter)
-                else:
-                    intersection = 0
-                
-                # Calcola union
-                pred_area = (x_max - x_min) * (y_max - y_min)
-                gt_area = gt_w * gt_h
-                union = pred_area + gt_area - intersection
-                
-                bbox_iou = intersection / union if union > 0 else 0
-                
-                # Calcola errori pose
-                trans_diff = (pred_translation - gt_translation) * 100 
-                trans_error = np.linalg.norm(trans_diff)
-                
-                # Rotation error con gestione simmetria
-                model_points_np = mesh_points_cache[obj_id].numpy()
-                rot_error = compute_rotation_error(pred_rotation, gt_rotation, obj_id, model_points_np)
-                
-                print(f"\n ERRORS:")
-                print(f"     BBox IoU (2D) by YOLO: {bbox_iou:.2%}")
-                print(f"     Translation Error: {trans_error:.2f} cm")
-                print(f"       - X error: {trans_diff[0]:6.2f} cm")
-                print(f"       - Y error: {trans_diff[1]:6.2f} cm")
-                print(f"       - Z error (depth): {trans_diff[2]:6.2f} cm")
-                print(f"     Rotation Error: {rot_error:.2f}°")
+                # Extract ground truth
+                if sample_id in gt_data:
+                    gt_info = gt_data[sample_id][0]  
+                    gt_rotation = np.array(gt_info['cam_R_m2c']).reshape(3, 3)
+                    gt_translation = np.array(gt_info['cam_t_m2c']) / 1000.0
+                    
+                    # Draw GROUND TRUTH (Green)
+                    img = draw_3d_bbox_colored(img, gt_rotation, gt_translation, cam_k, obj_id, models_info, color=(0, 255, 0))
+                    img = draw_axis_colored(img, gt_rotation, gt_translation, cam_k, scale=0.05, colors=[(0, 200, 0), (0, 255, 0), (0, 180, 0)])
+                    
+                    # Draw PREDICTION (Cyan)
+                    img = draw_3d_bbox_colored(img, pred_rotation, pred_translation, cam_k, obj_id, models_info, color=(255, 165, 0))
+                    img = draw_axis_colored(img, pred_rotation, pred_translation, cam_k, scale=0.05, colors=[(255, 100, 0), (255, 165, 0), (200, 130, 0)])
+        
+        # Convert to RGB and store
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        processed_images.append(img_rgb)
     
-    print("\n" + "="*70 + "\n")
-
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    # Display all images in a single row
+    fig, axes = plt.subplots(1, num_samples, figsize=figsize)
+    if num_samples == 1:
+        axes = [axes]
     
-    plt.figure(figsize=figsize)
-    plt.imshow(img_rgb)
-    plt.axis('off')
-    plt.title('Green = Ground Truth | Cyan = Prediction', fontsize=14)
+    for idx, img_rgb in enumerate(processed_images):
+        axes[idx].imshow(img_rgb)
+        axes[idx].axis('off')
+        axes[idx].set_title(f'Sample {idx+1}', fontsize=12)
+    
+    plt.suptitle('Green = Ground Truth | Cyan = Prediction', fontsize=14, y=0.98)
+    plt.tight_layout()
     plt.show()

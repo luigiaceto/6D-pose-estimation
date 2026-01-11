@@ -10,6 +10,7 @@ from utils.pose_utils import (
     load_models_points, 
     print_evaluation_results_table,
     compute_rotation_error,
+    compute_translation_error,
     compute_ADD,
     compute_ADDS,
     SYMMETRIC_OBJECTS,
@@ -34,9 +35,7 @@ def evaluate_extension_batch(
     model.eval()
 
     object_diameters = test_dataset.get_object_diameters() 
-    num_points = N_POINTS_TO_LOAD
-    print("Preloading mesh points for batch evaluation...")
-    mesh_points_cache = load_models_points(dataset_root, num_points=num_points)
+    mesh_points_cache = load_models_points(dataset_root)
     
     # Spostiamo tutti i punti sulla GPU subito per velocità
     for k, v in mesh_points_cache.items():
@@ -48,6 +47,7 @@ def evaluate_extension_batch(
     for obj_id in SYMMETRIC_OBJECTS:
         symmetry_lookup[obj_id] = True
     
+    num_points = N_POINTS_TO_LOAD
     model_points_bank = torch.zeros((max_id + 1, num_points, 3), device=device)
     for k, v in mesh_points_cache.items():
         model_points_bank[k] = v
@@ -71,7 +71,7 @@ def evaluate_extension_batch(
             gt_trans = batch['translation'].to(device)     # (B, 3)
             gt_rot_matrix = batch['rotation'].to(device)   # (B, 3, 3)
             gt_quat = batch['quaternion'].to(device)       # (B, 4)
-            obj_ids = batch['obj_id'].to(device)           # (B,)
+            obj_ids = batch['obj_id'].to(device).long()    # (B,)
 
             # Forward - Modello restituisce (pred_quat, pred_trans, pred_uv)
             pred_quat, pred_trans, _ = model(
@@ -86,7 +86,7 @@ def evaluate_extension_batch(
             # Costruiamo il tensore dei punti per questo batch specifico.
             # Prende i punti corretti per ogni oggetto nel batch e li impila.
             # Risultato: (B, N, 3)
-            batch_points = torch.stack([mesh_points_cache[int(oid)] for oid in obj_ids])
+            batch_points = model_points_bank[obj_ids]  # Indicizzazione diretta con obj_ids
             
             # Reshape translation per broadcasting: (B, 3) -> (B, 3, 1)
             pred_t_b = pred_trans.unsqueeze(-1)
@@ -98,13 +98,13 @@ def evaluate_extension_batch(
             # Calcola ADD-S (Simmetrico)
             adds_losses = compute_ADDS(pred_rot_matrix, gt_rot_matrix, batch_points, pred_t_b, gt_t_b)
             
-            # Calcola rotation errors con nuova API batch
+            # Calcola rotation errors
             rot_errors = compute_rotation_error(
                 pred_quat, gt_quat, obj_ids, symmetry_lookup, model_points_bank
             )  # (B,)
             
             # Calcola translation errors
-            trans_errors = torch.norm(pred_trans - gt_trans, p=2, dim=1) * 100  # m -> cm
+            trans_errors = compute_translation_error(pred_trans, gt_trans)
             
             # Portiamo tutto su CPU per logging
             add_res = add_losses.cpu().numpy()
@@ -112,6 +112,12 @@ def evaluate_extension_batch(
             rot_errors_np = rot_errors.cpu().numpy()
             trans_errors_np = trans_errors.cpu().numpy()
             ids_np = obj_ids.cpu().numpy()
+            
+            # Forza array 1D (evita 0-dimensional quando batch=1)
+            if trans_errors_np.ndim == 0:
+                trans_errors_np = trans_errors_np.reshape(-1)
+            if rot_errors_np.ndim == 0:
+                rot_errors_np = rot_errors_np.reshape(-1)
             
             batch_size = len(obj_ids)
             for i in range(batch_size):

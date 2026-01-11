@@ -9,6 +9,8 @@ from utils.pose_utils import (
     quaternion_to_rotation_matrix,  
     compute_ADD, 
     compute_ADDS,
+    compute_rotation_error,
+    compute_translation_error,
     load_models_points,
     print_evaluation_results_table,
     SYMMETRIC_OBJECTS, 
@@ -39,18 +41,16 @@ def evaluate_baseline(
     object_diameters = test_dataset.get_object_diameters()
     
     # Carica i punti del modello 
-    num_points = N_POINTS_TO_LOAD
-    print(f" Preloading HIGH RES models ({num_points} points per object)...")
-    model_points_dict = load_models_points(dataset_root, num_points=num_points)
+    model_points_dict = load_models_points(dataset_root)
 
     max_id = max(model_points_dict.keys())
-    n_pts = list(model_points_dict.values())[0].shape[0]
-    point_bank = torch.zeros((max_id + 1, n_pts, 3), dtype=torch.float32)
+    n_pts = N_POINTS_TO_LOAD
+    point_bank = torch.zeros((max_id + 1, n_pts, 3), dtype=torch.float32, device=device)
     for oid, pts in model_points_dict.items():
         point_bank[oid] = pts.to(device)
             
     # symmetry lookup table (True for symmetric objects)
-    symmetry_lookup = torch.zeros(max_id + 1, dtype=torch.bool)
+    symmetry_lookup = torch.zeros(max_id + 1, dtype=torch.bool, device=device)
     for obj_id in SYMMETRIC_OBJECTS:
         if obj_id <= max_id:
             symmetry_lookup[obj_id] = True
@@ -65,7 +65,7 @@ def evaluate_baseline(
             bbox_base = batch['bbox_base'].to(device)
             gt_trans = batch['translation'].to(device)    
             gt_rot_matrix = batch['rotation'].to(device) 
-            obj_ids = batch['obj_id'].to(device)          
+            obj_ids = batch['obj_id'].to(device).long() 
             
             # Ricostruiamo bbox xyxy per il pinhole
             bbox_xyxy = torch.stack([
@@ -105,19 +105,13 @@ def evaluate_baseline(
             final_add = torch.where(is_symmetric, adds_batch, add_batch)
             
             # --- ERRORE TRASLAZIONE ---
-            trans_errors = torch.norm(pred_trans - gt_trans, dim=1) * 100
+            trans_errors = compute_translation_error(pred_trans, gt_trans)
 
             # --- ERRORE ROTAZIONE ---
-            R_diff = torch.bmm(pred_rotation_matrix.transpose(1, 2), gt_rot_matrix)
-            trace = R_diff[:, 0, 0] + R_diff[:, 1, 1] + R_diff[:, 2, 2]
-            cos_theta = ((trace - 1) / 2.0).clamp(-1.0, 1.0)
-            rot_errors_deg = torch.rad2deg(torch.acos(cos_theta))
-            if is_symmetric.any():
-                # Raggio medio approssimato (diametro / 2)
-                radii = batch_diameters / 2.0 / 1000.0 # mm -> m
-                ratio = (adds_batch / (2 * radii)).clamp(-1.0, 1.0)
-                sym_rot_errors = torch.rad2deg(2 * torch.asin(ratio))
-                rot_errors_deg = torch.where(is_symmetric, sym_rot_errors, rot_errors_deg)
+            gt_quat = batch['quaternion'].to(device)
+            rot_errors_deg = compute_rotation_error(
+                pred_quaternion, gt_quat, obj_ids, symmetry_lookup, point_bank
+            )
 
             # Salvo su CPU
             B = len(obj_ids)
@@ -125,6 +119,12 @@ def evaluate_baseline(
             add_cpu = (final_add * 100).cpu().numpy() # m -> cm
             trans_cpu = trans_errors.cpu().numpy()
             rot_cpu = rot_errors_deg.cpu().numpy()
+            
+            # Forza array 1D (evita 0-dimensional quando batch=1)
+            if trans_cpu.ndim == 0:
+                trans_cpu = trans_cpu.reshape(-1)
+            if rot_cpu.ndim == 0:
+                rot_cpu = rot_cpu.reshape(-1)
             
             for i in range(B):
                 results_list.append({

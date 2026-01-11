@@ -106,7 +106,7 @@ def quaternion_to_rotation_matrix(quaternion):
     
     return R
 
-def load_models_points(dataset_root, num_points=1000):
+def load_models_points(dataset_root):
     """
     Carica i modelli 3D dal disco usando Farthest Point Sampling (FPS) 
     per una copertura geometrica ottimale.
@@ -114,6 +114,7 @@ def load_models_points(dataset_root, num_points=1000):
     cache = {}
     models_dir = dataset_root / "models"
     obj_ids = [1, 2, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]
+    num_points = N_POINTS_TO_LOAD
     
     print(f"Preloading 3D models with FPS (points={num_points}) from {models_dir}...")
     
@@ -260,14 +261,18 @@ def compute_rotation_error(pred_quat, gt_quat, class_ids, symmetry_lookup, model
         return errors  # Restituisce (B,) per batch processing
 
 def compute_translation_error(pred_t, gt_t):
-    """Errore di translation in CM (già convertito per compatibilità con codice esistente)."""
+    """Errore di translation in CM (già convertito per compatibilità con codice esistente).
+    
+    Returns:
+        torch.Tensor: (B,) errori individuali in centimetri
+    """
     if pred_t.ndim == 3: pred_t = pred_t.squeeze(-1)
     if gt_t.ndim == 3:   gt_t = gt_t.squeeze(-1)
 
-    # Calcolo vettorizzato (Batch)
+    # Calcolo vettorizzato (Batch) - restituisce (B,) 
     errors = torch.norm(pred_t - gt_t, dim=1)
 
-    return errors.mean() * 100.0
+    return errors * 100.0  # metri -> cm
 
 
 def print_evaluation_results_table(metrics_per_class, save_table=False, table_path="evaluation_results.csv"):

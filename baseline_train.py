@@ -14,7 +14,7 @@ from utils.pose_utils import (
 
 USE_AMP = True 
 
-def train(
+def train_baseline(
     train_dataset,
     train_loader,
     val_loader,
@@ -224,7 +224,7 @@ def train(
                 val_losses.append(losses['total_loss'].item())
 
                 # Monitoraggio Errore Rotazione
-                val_rot_errors.append(losses['rot_err_deg'])
+                val_rot_errors.append(losses['rot_err_deg'].item())
         
         avg_val_loss = np.mean(val_losses)
         avg_rot_error = np.mean(val_rot_errors)

@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 from models.TridentNetPose import TridentNetPose
 from models.ExtensionLoss import ExtensionLoss
-from utils.pose_utils import load_models_points
+from utils.pose_utils import load_models_points, N_POINTS_TO_LOAD
 
 
 def train_one_epoch(
@@ -197,7 +197,7 @@ def train(
     RGB Backbone: Partial unfreeze (solo layer4) dopo freeze_rgb_epochs.
     """
     
-    points_dict = load_models_points(dataset_root, num_points=2000)
+    points_dict = load_models_points(dataset_root)
 
     model = TridentNetPose(
         cam_k=cam_k
