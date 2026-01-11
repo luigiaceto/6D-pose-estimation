@@ -1,9 +1,6 @@
 .DS_Store
 __pycache__
 *.pdf
-domande.md
 datasets/
 runs/
-checkpoints/best_baseline_model.pt
-checkpoints/best_extension_model.pt
-appunti.md
+checkpoints/
