@@ -219,7 +219,7 @@ def compute_rotation_error(pred_quat, gt_quat, class_ids, symmetry_lookup, model
         
         # Indicizzazione su CPU, poi sposta su GPU
         class_ids_cpu = class_ids.long().cpu()
-        is_sym_cpu = symmetry_lookup[class_ids_cpu]      # CPU
+        is_sym_cpu = symmetry_lookup[class_ids_cpu].cpu()     # CPU
         is_sym = is_sym_cpu.to(device)                   # GPU  
         
         errors = torch.zeros(B, device=device)
