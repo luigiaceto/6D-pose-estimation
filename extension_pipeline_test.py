@@ -19,7 +19,9 @@ from utils.pose_utils import (
     print_evaluation_results_table,
     SYMMETRIC_OBJECTS,
     YOLO_TO_LINEMOD_MAP,
-    N_POINTS_TO_LOAD
+    N_POINTS_TO_LOAD,
+    IMG_WIDTH,
+    IMG_HEIGHT
 )
 
 def evaluate_extension_pipeline(
@@ -117,7 +119,10 @@ def evaluate_extension_pipeline(
             depth_batch = depth_tensor.unsqueeze(0).to(device)
             
             bbox_center_tensor = torch.tensor([[x_c, y_c]], dtype=torch.float32).to(device)
-            bbox_dims_tensor = torch.tensor([[w, h]], dtype=torch.float32).to(device)
+            
+            w_norm = w / IMG_WIDTH
+            h_norm = h / IMG_HEIGHT
+            bbox_dims_tensor = torch.tensor([[w_norm, h_norm]], dtype=torch.float32).to(device)
 
         except Exception as e:
             print(f"Error processing sample {folder_id}/{sample_id}: {e}")
