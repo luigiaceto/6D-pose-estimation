@@ -58,7 +58,7 @@ def evaluate_extension_pipeline(
     yolo = YOLO(yolo_checkpoint)
     
     pose_model = TridentNetPose(cam_k=cam_k).to(device)
-    checkpoint = torch.load(model_checkpoint, map_location=device)
+    checkpoint = torch.load(model_checkpoint, map_location=device, weights_only=False)
     pose_model.load_state_dict(checkpoint["model_state_dict"])
     pose_model.eval()
 

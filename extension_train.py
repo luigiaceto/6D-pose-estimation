@@ -248,9 +248,9 @@ def train(
     
     if resume_from_checkpoint is not None:
         print(f"Loading checkpoint from {resume_from_checkpoint}")
-        checkpoint = torch.load(resume_from_checkpoint, map_location=device)
+        checkpoint = torch.load(resume_from_checkpoint, map_location=device, weights_only=False)
         
-        model.load_state_dict(checkpoint['model_state_dict'])
+        real_model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         

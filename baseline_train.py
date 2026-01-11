@@ -109,7 +109,7 @@ def train_baseline(
     # Resume from checkpoint in caso si volesse rifar partire un training
     if resume_from_checkpoint is not None and os.path.exists(resume_from_checkpoint):
         print(f"Resuming from checkpoint: {resume_from_checkpoint}")
-        checkpoint = torch.load(resume_from_checkpoint, map_location=device)
+        checkpoint = torch.load(resume_from_checkpoint, map_location=device, weights_only=False)
         
         get_raw_model(model).load_state_dict(checkpoint['model_state_dict'])
         
