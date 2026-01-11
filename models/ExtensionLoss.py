@@ -138,7 +138,7 @@ class ExtensionLoss(nn.Module):
             rot_err_deg = compute_rotation_error(
                 pred_quat, gt_quat, class_ids, 
                 self.symmetry_lookup, self.model_points_bank
-            )
+            ).mean()
 
         return {
             'total_loss': total_loss,

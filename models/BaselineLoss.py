@@ -77,7 +77,7 @@ class BaselineLoss(nn.Module):
                 class_ids.cpu(), 
                 self.symmetry_lookup, 
                 self.model_points_bank
-            )
+            ).mean()
         
         return {
             'total_loss': rot_loss,

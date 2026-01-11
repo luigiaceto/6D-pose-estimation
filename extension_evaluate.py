@@ -12,7 +12,6 @@ from utils.pose_utils import (
     compute_rotation_error,
     compute_ADD,
     compute_ADDS,
-    compute_translation_error,
     SYMMETRIC_OBJECTS,
     N_POINTS_TO_LOAD
 )
@@ -42,6 +41,16 @@ def evaluate_extension_batch(
     # Spostiamo tutti i punti sulla GPU subito per velocità
     for k, v in mesh_points_cache.items():
         mesh_points_cache[k] = v.to(device)
+    
+    # Pre-build lookup tables per compute_rotation_error (efficienza)
+    max_id = max(mesh_points_cache.keys())
+    symmetry_lookup = torch.zeros(max_id + 1, dtype=torch.bool, device=device)
+    for obj_id in SYMMETRIC_OBJECTS:
+        symmetry_lookup[obj_id] = True
+    
+    model_points_bank = torch.zeros((max_id + 1, num_points, 3), device=device)
+    for k, v in mesh_points_cache.items():
+        model_points_bank[k] = v
 
     # Accumulatori
     all_add = []
@@ -61,6 +70,7 @@ def evaluate_extension_batch(
             
             gt_trans = batch['translation'].to(device)     # (B, 3)
             gt_rot_matrix = batch['rotation'].to(device)   # (B, 3, 3)
+            gt_quat = batch['quaternion'].to(device)       # (B, 4)
             obj_ids = batch['obj_id'].to(device)           # (B,)
 
             # Forward - Modello restituisce (pred_quat, pred_trans, pred_uv)
@@ -88,18 +98,22 @@ def evaluate_extension_batch(
             # Calcola ADD-S (Simmetrico)
             adds_losses = compute_ADDS(pred_rot_matrix, gt_rot_matrix, batch_points, pred_t_b, gt_t_b)
             
-            # Portiamo tutto su CPU per logging e calcoli finali leggeri
-            add_res = (add_losses).cpu().numpy()
-            adds_res = (adds_losses).cpu().numpy()
+            # Calcola rotation errors con nuova API batch
+            rot_errors = compute_rotation_error(
+                pred_quat, gt_quat, obj_ids, symmetry_lookup, model_points_bank
+            )  # (B,)
             
-            # Calcolo errori classici (rot in deg, trans in cm)
-            batch_size = len(obj_ids)
-            pred_R_np = pred_rot_matrix.cpu().numpy()
-            gt_R_np = gt_rot_matrix.cpu().numpy()
-            pred_t_np = pred_trans.cpu().numpy()
-            gt_t_np = gt_trans.cpu().numpy()
+            # Calcola translation errors
+            trans_errors = torch.norm(pred_trans - gt_trans, p=2, dim=1) * 100  # m -> cm
+            
+            # Portiamo tutto su CPU per logging
+            add_res = add_losses.cpu().numpy()
+            adds_res = adds_losses.cpu().numpy()
+            rot_errors_np = rot_errors.cpu().numpy()
+            trans_errors_np = trans_errors.cpu().numpy()
             ids_np = obj_ids.cpu().numpy()
             
+            batch_size = len(obj_ids)
             for i in range(batch_size):
                 oid = int(ids_np[i])
                 diameter = object_diameters[oid]
@@ -110,11 +124,8 @@ def evaluate_extension_batch(
                 else:
                     final_add = add_res[i]
                 
-                # Calcolo errori classici (rot/trans)
-                # Nota: compute_rotation_error è leggero, si può lasciare in numpy
-                batch_points_np = batch_points.cpu().numpy()  # Converti batch in numpy
-                rot_err = compute_rotation_error(pred_R_np[i], gt_R_np[i], oid, batch_points_np[i])
-                trans_err = compute_translation_error(pred_t_np[i], gt_t_np[i])
+                rot_err = rot_errors_np[i]
+                trans_err = trans_errors_np[i]
                 
                 all_add.append(final_add)
                 all_rot_errors.append(rot_err)

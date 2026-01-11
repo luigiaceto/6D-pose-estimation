@@ -149,7 +149,7 @@ def evaluate_extension_pipeline(
         class_id_tensor = torch.tensor([gt_obj_id], device=device)
         r_err = compute_rotation_error(
             pred_q, gt_quat, class_id_tensor, symmetry_lookup, model_points_bank
-        ).item()
+        )[0].item()  # Extract first element from (1,) tensor
         
         # Translation error (calcolo diretto)
         t_err = torch.norm(pred_t - gt_t, p=2, dim=1).item() * 100  # METRI -> CM

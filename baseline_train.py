@@ -243,7 +243,7 @@ def train(
                     obj_id,
                     symmetry_lookup,
                     mesh_points_cache
-                ).item()
+                ).mean().item()
                 val_rot_errors.append(rot_err_deg)
         
         avg_val_loss = np.mean(val_losses)
