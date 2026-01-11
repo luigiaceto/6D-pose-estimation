@@ -49,16 +49,7 @@ def train(
     
     # Carica model points per rotation error
     dataset_root = train_dataset.dataset_root
-    num_points = N_POINTS_TO_LOAD
-    print(f"Loading mesh points for rotation error calculation...")
-    mesh_points_cache = load_models_points(dataset_root, num_points=num_points)
-    for k, v in mesh_points_cache.items():
-        mesh_points_cache[k] = v.to(device)
-    
-    # Symmetry lookup
-    symmetry_lookup = torch.zeros(max_obj_id + 1, dtype=torch.bool, device=device)
-    for sym_id in SYMMETRIC_OBJECTS:
-        symmetry_lookup[sym_id] = True
+    points_dict = load_models_points(dataset_root, num_points=2000)
     
     # Model Setup
     model = ResNetPose().to(device)
@@ -74,9 +65,8 @@ def train(
 
     # Loss (ora richiede model_points_dict per centered ADD/ADD-S)
     criterion = BaselineLoss(
-        model_points_dict=mesh_points_cache
+        model_points_dict=points_dict
     )
-
     
     # Funzione helper per recuperare il modello "reale" (dentro o fuori DataParallel)
     def get_raw_model(m):
@@ -236,15 +226,8 @@ def train(
                 )
                 val_losses.append(losses['total_loss'].item())
 
-                # Monitoraggio Errore Rotazione (come extension)
-                rot_err_deg = compute_rotation_error(
-                    pred_quaternion,
-                    gt_quaternion,
-                    obj_id,
-                    symmetry_lookup,
-                    mesh_points_cache
-                ).item()
-                val_rot_errors.append(rot_err_deg)
+                # Monitoraggio Errore Rotazione
+                val_rot_errors.append(losses['rot_err_deg'])
         
         avg_val_loss = np.mean(val_losses)
         avg_rot_error = np.mean(val_rot_errors)
