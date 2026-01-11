@@ -28,7 +28,7 @@ def evaluate_baseline(
 ):
     
     model = ResNetPose().to(device)
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
     
@@ -42,7 +42,7 @@ def evaluate_baseline(
     num_points = N_POINTS_TO_LOAD
     print(f" Preloading HIGH RES models ({num_points} points per object)...")
     model_points_dict = load_models_points(dataset_root, num_points=num_points)
-
+       
     max_id = max(model_points_dict.keys())
     n_pts = list(model_points_dict.values())[0].shape[0]
     point_bank = torch.zeros((max_id + 1, n_pts, 3), dtype=torch.float32)
@@ -65,7 +65,7 @@ def evaluate_baseline(
             bbox_base = batch['bbox_base'].to(device)
             gt_trans = batch['translation'].to(device)    
             gt_rot_matrix = batch['rotation'].to(device) 
-            obj_ids = batch['obj_id'].to(device)          
+            obj_ids = batch['obj_id'].to(device).long()         
             
             # Ricostruiamo bbox xyxy per il pinhole
             bbox_xyxy = torch.stack([
@@ -92,7 +92,7 @@ def evaluate_baseline(
             pred_quaternion = model(cropped_img)  # (B, 4)
             pred_rotation_matrix = quaternion_to_rotation_matrix(pred_quaternion)
             
-            batch_points = point_bank[obj_ids]
+            batch_points = point_bank[obj_ids]  # (B, N, 3)
             
             # Reshape per batch functions: (B, 3) -> (B, 3, 1)
             pred_t_batch = pred_trans.unsqueeze(-1)
