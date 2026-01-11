@@ -30,7 +30,7 @@ def evaluate_extension_batch(
 ):
     
     model = TridentNetPose(cam_k=cam_k).to(device)
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 
