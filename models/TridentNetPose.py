@@ -72,7 +72,7 @@ class TridentNetPose(nn.Module):
             nn.Linear(fusion_dim, 1024),
             nn.LayerNorm(1024), # nel layer di fusione è meglio rispetto la BatchNorm
             nn.ReLU(),
-            nn.Dropout(0.2)  # Bug #5 Fix: Ridotto da 0.5 a 0.2 (LineMOD è piccolo)
+            nn.Dropout(0.2)
         )
         
         # ========== 3 teste finali ==========
