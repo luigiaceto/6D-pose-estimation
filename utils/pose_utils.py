@@ -257,7 +257,7 @@ def compute_rotation_error(pred_quat, gt_quat, class_ids, symmetry_lookup, model
             arg = torch.clamp(mean_dist_norm / 2.0, 0.0, 1.0)
             errors[is_sym] = torch.rad2deg(2 * torch.asin(arg))
             
-        return errors.mean()
+        return errors.mean().item()
 
 def compute_translation_error(pred_t, gt_t):
     """Errore di translation in CM (già convertito per compatibilità con codice esistente)."""
