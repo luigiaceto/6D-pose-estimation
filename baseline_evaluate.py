@@ -116,7 +116,7 @@ def evaluate_baseline(
             # Salvo su CPU
             B = len(obj_ids)
             ids_cpu = obj_ids.cpu().numpy()
-            add_cpu = (final_add * 100).cpu().numpy() # m -> cm
+            add_cpu = final_add.cpu().numpy()  # Keep in meters
             trans_cpu = trans_errors.cpu().numpy()
             rot_cpu = rot_errors_deg.cpu().numpy()
             
@@ -144,9 +144,9 @@ def evaluate_baseline(
     grouped = df_raw.groupby('class_id')
     
     for cls_id, group in grouped:
-        # Diametro in cm
-        cls_diam_cm = object_diameters[cls_id] / 10.0
-        threshold = cls_diam_cm * 0.1
+        # Diametro in metri
+        cls_diam_m = object_diameters[cls_id] / 1000.0
+        threshold = cls_diam_m * 0.1
         
         accuracy = (group['add'] < threshold).mean() * 100
         
@@ -155,7 +155,7 @@ def evaluate_baseline(
             'num_samples': len(group),
             'rot_mean': group['rotation'].mean(),
             'trans_mean': group['translation'].mean(),
-            'add_mean': group['add'].mean() / 100.0, # torna a metri per compatibilità con print_table
+            'add_mean': group['add'].mean(),  # Already in meters
             'accuracy_10p': accuracy
         })
 
@@ -166,8 +166,8 @@ def evaluate_baseline(
     
     for i, row in df_raw.iterrows():
         cls_id = row['class_id']
-        thresh = (object_diameters[cls_id] / 10.0) * 0.1
-        if row['add'] < thresh:
+        thresh_m = (object_diameters[cls_id] / 1000.0) * 0.1  # meters
+        if row['add'] < thresh_m:
             correct_samples += 1
         valid_samples += 1
             
@@ -178,7 +178,7 @@ def evaluate_baseline(
         'num_samples': len(df_raw),
         'rot_mean': df_raw['rotation'].mean(),
         'trans_mean': df_raw['translation'].mean(),
-        'add_mean': df_raw['add'].mean() / 100.0, # metri
+        'add_mean': df_raw['add'].mean(),  # Already in meters
         'accuracy_10p': total_accuracy
     })
 

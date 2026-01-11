@@ -188,8 +188,8 @@ def evaluate_extension_pipeline(
             'class_id': class_id, 
             'num_samples': len(metrics),
             'rot_mean': metrics_df['rotation'].mean(), 
-            'trans_mean': metrics_df['translation'].mean(),
-            'add_mean': metrics_df['add'].mean(), 
+            'trans_mean': metrics_df['translation'].mean(),  # Already in cm
+            'add_mean': metrics_df['add'].mean() / 100.0,  # cm -> meters for print_table
             'accuracy_10p': acc_10p
         })
         
@@ -202,8 +202,8 @@ def evaluate_extension_pipeline(
         'class_id': 'MEAN', 
         'num_samples': len(all_adds_cm),
         'rot_mean': np.mean(all_metrics['rot_err']), 
-        'trans_mean': np.mean(all_metrics['trans_err']),
-        'add_mean': np.mean(all_adds_cm), 
+        'trans_mean': np.mean(all_metrics['trans_err']),  # Already in cm
+        'add_mean': np.mean(all_adds_cm) / 100.0,  # cm -> meters for print_table
         'accuracy_10p': acc_all
     })
     

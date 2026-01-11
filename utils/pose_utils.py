@@ -312,7 +312,11 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
         ]
     ]
 
-    df = df.round(2)
+    # --- FIX: Formattazione Stringa Forzata per evitare 17.969999 ---
+    cols_to_fix = ['Rotation Error (deg)', 'Translation Error (cm)', 'ADD(-S) (cm)', 'Accuracy @10% (%)']
+    for col in cols_to_fix:
+        df[col] = df[col].apply(lambda x: f"{x:.2f}")
+    # ----------------------------------------------------------------
 
     if save_table:
         df.to_csv(table_path, index=False)
