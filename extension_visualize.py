@@ -13,9 +13,6 @@ from models.TridentNetPose import TridentNetPose
 from utils.pose_utils import quaternion_to_rotation_matrix, YOLO_TO_LINEMOD_MAP
 from utils.visualization import draw_3d_bbox_colored, draw_axis_colored
 
-# =============================================================================
-# MAIN PIPELINE
-# =============================================================================
 
 def visualize_extension(
     dataset_root,

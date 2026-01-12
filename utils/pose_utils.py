@@ -45,15 +45,14 @@ def compute_z_from_depth_crop(cropped_depth):
     # Flatten dell'intera depth map per ogni sample
     flat_depth = depth_m[:, 0, :, :].reshape(B, -1)  # (B, H*W)
     
-    # Filtro Background e Outlier (Vettorizzato con NaN) ---
-    # Creiamo una maschera dei valori validi
+    # Invalidiamo i valori vicino lo zero (rumore) e valori grandi (sfondo)
     valid_mask = (flat_depth > 0.05) & (flat_depth < 4.0)
     
     # Sostituiamo i valori invalidi con NaN (Not a Number)
     depth_with_nans = flat_depth.clone()
     depth_with_nans[~valid_mask] = float('nan')
     
-    # --- 4. Calcolo Percentile Robusto (10% dei valori più vicini) ---
+    # --- Calcolo Percentile Robusto (10% dei valori più vicini) ---
     # Strategia: L'oggetto è tipicamente la cosa più vicina nel crop.
     # Prendiamo il 10° percentile (ignora outlier come background lontano o pixel nulli)
     
@@ -68,7 +67,7 @@ def compute_z_from_depth_crop(cropped_depth):
     # Estrai il valore del percentile per ogni batch
     z_finals = sorted_depths[torch.arange(B), percentile_idx]
     
-    # --- 5. Fallback per righe completamente invalide ---
+    # Fallback per righe completamente invalide
     invalid_batch_mask = torch.isnan(z_finals)
     
     if invalid_batch_mask.any():
@@ -77,7 +76,6 @@ def compute_z_from_depth_crop(cropped_depth):
     z_final = z_finals.unsqueeze(1) # (B, 1)
 
     return z_final
-
 
 
 def quaternion_to_rotation_matrix(quaternion):
@@ -166,7 +164,6 @@ def load_models_points(dataset_root):
 # --------------------- FUNZIONI UTILS PER IL TRAINING --------------
 #region
     
-
 
 def compute_ADD(pred_R, gt_R, points, pred_t=None, gt_t=None):
     """ Calcola la metrica ADD (Average Distance of Model Points) """
@@ -325,4 +322,3 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
         print(f"Saved CSV to {table_path}")
     return df
 #endregion
-

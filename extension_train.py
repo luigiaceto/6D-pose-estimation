@@ -22,16 +22,15 @@ def train_one_epoch(
     # Safe attribute access per DataParallel
     real_model = model.module if hasattr(model, "module") else model
     
-    # 2. Sblocca le parti che devono imparare (Training Mode)
-    #    - fusion_fc, z_head, offset_head, rot_head: Hanno Dropout -> Serve .train()
-    #    - depth_backbone: Ha BatchNorm nuove -> Serve .train() per calcolare le statistiche!
+    # Sblocca le parti che devono imparare (Training Mode)
+    #   - fusion_fc, z_head, offset_head, rot_head: Hanno Dropout -> Serve .train()
+    #   - depth_backbone: Ha BatchNorm nuove -> Serve .train() per calcolare le statistiche!
     real_model.fusion_fc.train()
     real_model.z_head.train()
     real_model.offset_head.train()
     real_model.rot_head.train() 
     real_model.depth_backbone.train() 
 
-    # Inizializzazione Accumulatori (loss geometriche 3D + 2D)
     total_loss_sum = 0
     rot_loss_sum = 0          # Centered ADD/ADD-S
     trans_loss_sum = 0        # Pure Translation L1
@@ -53,7 +52,6 @@ def train_one_epoch(
         optimizer.zero_grad(set_to_none=True)
         
         with torch.amp.autocast(device_type='cuda', enabled=True):
-            # Forward (z_geometric calcolato internamente dal modello)
             pred_quat, pred_trans, pred_uv = model(
                 cropped_img, 
                 cropped_depth, 
@@ -61,7 +59,6 @@ def train_one_epoch(
                 bbox_dims
             )
             
-            # Calcola loss geometrica 3D + 2D (con pred_uv disaccoppiato)
             loss_dict = criterion(
                 pred_quat=pred_quat, 
                 pred_trans=pred_trans,
@@ -79,7 +76,6 @@ def train_one_epoch(
         scaler.step(optimizer)
         scaler.update()
         
-        # logging (loss geometriche 3D + 2D)
         total_loss_sum += loss.item()
         rot_loss_sum += loss_dict['rot_loss'].item()
         trans_loss_sum += loss_dict['trans_loss'].item()
@@ -109,7 +105,6 @@ def validate(
 
     model.eval()
     
-    # Inizializzazione accumulatori (loss geometriche 3D + 2D)
     total_loss_sum = 0
     rot_loss_sum = 0
     trans_loss_sum = 0
@@ -129,7 +124,6 @@ def validate(
             bbox_dims = batch['bbox_dims'].to(device, non_blocking=True)
 
             with torch.amp.autocast(device_type='cuda', enabled=True):
-                # Forward (z_geometric calcolato internamente dal modello)
                 pred_quat, pred_trans, pred_uv = model(
                     cropped_img, 
                     cropped_depth, 
@@ -137,7 +131,6 @@ def validate(
                     bbox_dims
                 )
                 
-                # Calcola loss geometrica 3D + 2D (con pred_uv disaccoppiato)
                 loss_dict = criterion(
                     pred_quat=pred_quat, 
                     pred_trans=pred_trans,
@@ -147,7 +140,6 @@ def validate(
                     pred_uv=pred_uv
                 )
             
-            # logging (loss geometriche 3D + 2D)
             total_loss_sum += loss_dict['total_loss'].item()
             rot_loss_sum += loss_dict['rot_loss'].item()
             trans_loss_sum += loss_dict['trans_loss'].item()

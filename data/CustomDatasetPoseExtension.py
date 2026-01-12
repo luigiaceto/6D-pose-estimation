@@ -31,7 +31,7 @@ class RGBDDatasetPose(CustomDatasetPose):
         
         # Conversione in Tensor: da (H, W) a (1, H, W)
         depth_tensor = torch.tensor(np.array(square_depth), dtype=torch.float32)
-        depth_tensor = depth_tensor / 1000.0 # Converti mm -> metri
+        depth_tensor = depth_tensor / 1000.0 # mm -> metri
         
         if self.split == 'train':
             valid_mask = depth_tensor > 0

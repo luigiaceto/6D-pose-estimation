@@ -83,7 +83,7 @@ class TridentNetPose(nn.Module):
         # Invece di predire Z assoluta, predice un DELTA (correzione skin-to-heart)
         # Inizializzazione vicino a 0 così all'inizio si affida alla geometria
         self.z_head = nn.Sequential(
-            nn.Linear(1024, 128),  # Solo fused features (no z_geometric injection)
+            nn.Linear(1024, 128),
             nn.ReLU(),
             nn.Dropout(0.2),
             nn.Linear(128, 1)  # Output: Delta_Z (metri) - correzione da applicare a Z_geometric
@@ -100,7 +100,7 @@ class TridentNetPose(nn.Module):
         self._init_weights()
 
     def _init_weights(self):
-        # 1. Inizializzazione GENERICA per i moduli "standard"
+        # Inizializzazione GENERICA per i moduli "standard"
         for m in [self.fusion_fc, self.z_head, self.offset_head]:
             for layer in m.modules():
                 if isinstance(layer, nn.Linear):
@@ -108,7 +108,7 @@ class TridentNetPose(nn.Module):
                     if layer.bias is not None:
                         nn.init.constant_(layer.bias, 0.0)
         
-        # 2. Inizializzazione SPECIFICA per la Rotazione (Rot Head)
+        # Inizializzazione SPECIFICA per la Rotazione (Rot Head)
         # Gain 0.01 serve a far partire la rotazione come "quasi uniforme" ma deterministica
         nn.init.xavier_uniform_(self.rot_head.weight, gain=0.01)
         
@@ -118,7 +118,7 @@ class TridentNetPose(nn.Module):
             self.rot_head.bias.fill_(0)
             self.rot_head.bias[0] = 1.0
 
-        # 3. Sovrascrittura SPECIFICA per l'ultimo layer di Z (Residual)
+        # Sovrascrittura SPECIFICA per l'ultimo layer di Z (Residual).
         # I layer precedenti di z_head sono stati inizializzati nel loop sopra (gain 1.0).
         # Qui sovrascriviamo SOLO l'ultimo per farlo partire da ~0.
         nn.init.xavier_uniform_(self.z_head[-1].weight, gain=0.01)
@@ -139,7 +139,7 @@ class TridentNetPose(nn.Module):
             pred_trans: (B, 3) - Translation assoluta in metri [x, y, z]
         """
         
-        # --- Calcolo Z Geometric Prior (interno) ---
+        # --- Calcolo stima geometrica Z iniziale ---
         z_geometric = compute_z_from_depth_crop(cropped_depth=depth)  # (B, 1)
         
         # --- Feature Extraction ---
@@ -156,10 +156,8 @@ class TridentNetPose(nn.Module):
         pred_quat = self.rot_head(fused)
         pred_quat = F.normalize(pred_quat, p=2, dim=1)
         
-        # Depth Z - RESIDUAL DELTA (solo da feature visive) 
+        # Depth Z - RESIDUAL DELTA
         delta_z = self.z_head(fused)  # (B, 1) - predice delta solo dalle feature
-        
-        # Combina geometric prior + delta learned
         pred_z = z_geometric + delta_z  # (B, 1)
         pred_z = torch.clamp(pred_z, min=0.01)  # Evita depth negativa
         
