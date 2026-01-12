@@ -82,7 +82,7 @@ def evaluate_baseline_pipeline(
         
         # Essendo batch=1, prendiamo l'indice [0]
         gt_R = batch["rotation"][0].to(device)         # (3, 3)
-        gt_t = batch["translation"][0].to(device)      # (3,) - MUST stay as tensor!
+        gt_t = batch["translation"][0].to(device)      # (3,)
         gt_obj_id = int(batch["obj_id"][0])
         
         folder_id = int(batch['sample_id'][0][0])

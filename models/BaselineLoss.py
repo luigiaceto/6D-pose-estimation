@@ -17,7 +17,7 @@ class BaselineLoss(nn.Module):
     La translation viene calcolata geometricamente da bbox + diametro.
     
     Loss functions:
-    - Centered ADD/ADD-S: isola la rotazione sui punti centrati (come ExtensionLoss)
+    - Centered ADD/ADD-S: isola la rotazione sui punti centrati.
     """
     
     def __init__(self, model_points_dict):
@@ -70,7 +70,7 @@ class BaselineLoss(nn.Module):
         # Translation error SOLO per monitoraggio
         with torch.no_grad():
             trans_error_m = torch.mean(torch.norm(pred_trans - gt_trans, dim=1))
-            trans_error_cm = trans_error_m * 100  # metri -> cm
+            trans_error_cm = trans_error_m * 100  # m -> cm
             rot_err_deg = compute_rotation_error(
                 pred_quat, 
                 gt_quat, 

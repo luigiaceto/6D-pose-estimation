@@ -30,12 +30,9 @@ def get_camera_intrinsics(dataset_root):
     Si assume che la camera sia la stessa per tutto il dataset.
     """
     target_file = str(dataset_root / "data" / "01" / "info.yml")
-   
     with open(target_file, 'r') as f:
         data = yaml.load(f, Loader=yaml.CLoader)
-
         first_frame_data = data[0]
-        
         if 'cam_K' in first_frame_data:
             cam_K = np.array(first_frame_data['cam_K'], dtype=np.float32)
             return cam_K

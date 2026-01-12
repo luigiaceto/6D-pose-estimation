@@ -20,6 +20,7 @@ from utils.pose_utils import (
 )
 from utils.visualization import draw_3d_bbox_colored, draw_axis_colored 
 
+
 def visualize_baseline(
     dataset_root,
     cam_k,

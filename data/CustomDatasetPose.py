@@ -78,7 +78,7 @@ class CustomDatasetPose(Dataset):
                 )
             ])
         else:
-            # Validation/Test: Nessuna augmentation, solo resize e normalize
+            # Test: Nessuna augmentation, solo resize e normalize
             self.transform_img = transforms.ToTensor()
 
             self.transform_crop = transforms.Compose([
@@ -89,7 +89,7 @@ class CustomDatasetPose(Dataset):
                 )
             ])
 
-        # store everything instead of opening each time file, this can speed up computation
+        # store everything instead of opening each time the file, this can speed up computation
         self.ground_truths = self.extract_ground_truth()
         
         # Load object info and extract diameters
@@ -184,8 +184,8 @@ class CustomDatasetPose(Dataset):
         x_center = x_min + width / 2
         y_center = y_min + height / 2
 
-        # Gestione bbox parzialmente fuori dall'immagine
-        # Se il centro è fuori, lo clippiamo e aggiustiamo width/height di conseguenza
+        # Gestione bbox parzialmente fuori dall'immagine.
+        # Se il centro è fuori, lo clippiamo e aggiustiamo width/height di conseguenza.
         if x_center < 0:
             width += 2 * x_center  # x_center è negativo, sottraiamo
             x_center = 0
@@ -289,7 +289,6 @@ class CustomDatasetPose(Dataset):
         """
         x, y, w, h = bbox
         
-        # Convertiamo in interi per PIL e facciamo il crop
         crop_rect = (
             int(x), 
             int(y), 
@@ -327,13 +326,8 @@ class CustomDatasetPose(Dataset):
         """
         img = Image.open(img_path).convert("RGB")
         img_w, img_h = img.size
-            
-        # Applica jittering (metodo centralizzato)
         bbox_jittered = self.apply_bbox_jitter(bbox, img_w, img_h)
-            
-        # Crop usando il metodo puro (condiviso con la classe figlia)
         square_img = self._crop_and_pad_image(img, bbox_jittered)
-
         return self.transform_crop(square_img)
 
     def load_6d_pose(self, folder_id: int = None, sample_id: int = None):
@@ -348,9 +342,6 @@ class CustomDatasetPose(Dataset):
         bbox_gt = np.array(pose['obj_bb'], dtype=np.float32)                    # x_min, y_min, width, height ---> dim 4
         obj_id = np.array(pose['obj_id'], dtype=np.float32)                     # label ---> dim 1
 
-        bbox_gt_YOLO = self.compute_yolo_bbox(bbox_gt)
-
-        # Calcola bbox YOLO usando il metodo centralizzato
         bbox_gt_YOLO = self.compute_yolo_bbox(bbox_gt)
 
         return translation, rotation, quaternion, bbox_gt, obj_id, bbox_gt_YOLO

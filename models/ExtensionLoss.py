@@ -21,7 +21,7 @@ class ExtensionLoss(nn.Module):
     
     Total Loss = λ_rot * L_rot + λ_trans * L_trans + λ_proj * L_proj
     
-    NOTA: La ricostruzione 3D (back-projection) è ora nel modello.
+    NOTA: La ricostruzione 3D (back-projection) è nel forward.
     """
     def __init__(self, rot_weight, trans_weight, proj_weight, cam_k, model_points_dict):
         super().__init__()
@@ -74,7 +74,6 @@ class ExtensionLoss(nn.Module):
         """
         device = pred_quat.device
         
-        # STEP 1: Compute GT 2D projection (disaccoppiato da pred_trans)
         # Clamp depth per evitare divisioni per zero
         gt_trans_safe = gt_trans.clone()
         gt_trans_safe[:, 2] = torch.clamp(gt_trans[:, 2], min=0.01)
@@ -82,9 +81,7 @@ class ExtensionLoss(nn.Module):
         # Proiezione GT 3D → 2D
         gt_uv = self.pinhole.project_3d_to_2d(gt_trans_safe)  # (B, 2)
         
-        # STEP 2: LOSS COMPUTATION
-        
-        # --- L_rot: Centered ADD/ADD-S (rotation-only, optimized) ---
+        # --- L_rot: Centered ADD/ADD-S (rotation-only) ---
         batch_points = self.model_points_bank[class_ids.long()]  # (B, N, 3)
         pred_R = quaternion_to_rotation_matrix(pred_quat)  # (B, 3, 3)
         gt_R = quaternion_to_rotation_matrix(gt_quat)      # (B, 3, 3)
@@ -119,18 +116,15 @@ class ExtensionLoss(nn.Module):
         # --- L_trans: Pure Translation L1 (in METERS) ---
         loss_trans = F.l1_loss(pred_trans, gt_trans)
         
-        # --- L_proj: 2D Projection (regolarizzazione, disaccoppiata) ---
-        # Usa direttamente pred_uv vs gt_uv (nessuna proiezione di pred_trans)
+        # --- L_proj: 2D Projection ---
         loss_proj = F.smooth_l1_loss(pred_uv, gt_uv, beta=1.0)
 
-        # TOTAL LOSS
         total_loss = (
             self.w_rot * loss_rot + 
             self.w_trans * loss_trans + 
             self.w_proj * loss_proj
         )
 
-        # METRICS FOR LOGGING
         with torch.no_grad():
             trans_err_cm = torch.norm(pred_trans - gt_trans, p=2, dim=1).mean() * 100
             proj_err_px = torch.norm(pred_uv - gt_uv, p=2, dim=1).mean()

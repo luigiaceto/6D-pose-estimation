@@ -12,6 +12,7 @@ from pathlib import Path
 from utils.pose_utils import yolo_to_xyxy
 from utils.visualization import draw_2d_bbox
 
+
 def visualize_yolo_predictions(
     yolo_model_path,
     yolo_dataset_path,

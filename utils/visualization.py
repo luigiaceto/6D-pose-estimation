@@ -31,7 +31,7 @@ def draw_3d_bbox_colored(img, R, t, K, obj_id, models_info, color=(255, 255, 0))
         [min_x, min_y + size_y, min_z + size_z]
     ], dtype=np.float32)
     
-    # Proiezione: t è in metri, convertiamo in mm per coerenza con corners_3d (o viceversa)
+    # Proiezione: t è in metri, convertiamo in mm per coerenza con corners_3d (o viceversa).
     # Qui convertiamo t in mm: t * 1000
     corners_cam = (R @ corners_3d.T).T + t * 1000.0
     
