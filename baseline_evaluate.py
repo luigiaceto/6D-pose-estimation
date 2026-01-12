@@ -149,6 +149,7 @@ def evaluate_baseline(
         threshold = cls_diam_m * 0.1
         
         accuracy = (group['add'] < threshold).mean() * 100
+        accuracy_2cm = (group['add'] < 0.02).mean() * 100  # 2 cm threshold
         
         per_class_results.append({
             'class_id': cls_id,
@@ -156,7 +157,8 @@ def evaluate_baseline(
             'rot_mean': group['rotation'].mean(),
             'trans_mean': group['translation'].mean(),
             'add_mean': group['add'].mean(),  # Already in meters
-            'accuracy_10p': accuracy
+            'accuracy_10p': accuracy,
+            'accuracy_2cm': accuracy_2cm
         })
 
     # Calcolo accuracy globale pesata sui singoli sample
@@ -172,6 +174,7 @@ def evaluate_baseline(
         valid_samples += 1
             
     total_accuracy = (correct_samples / valid_samples * 100) if valid_samples > 0 else 0
+    total_accuracy_2cm = (df_raw['add'] < 0.02).mean() * 100  # 2 cm threshold
 
     per_class_results.append({
         'class_id': 'MEAN',
@@ -179,7 +182,8 @@ def evaluate_baseline(
         'rot_mean': df_raw['rotation'].mean(),
         'trans_mean': df_raw['translation'].mean(),
         'add_mean': df_raw['add'].mean(),  # Already in meters
-        'accuracy_10p': total_accuracy
+        'accuracy_10p': total_accuracy,
+        'accuracy_2cm': total_accuracy_2cm
     })
 
     return print_evaluation_results_table(per_class_results, save_table, table_path)

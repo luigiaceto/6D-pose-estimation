@@ -297,7 +297,8 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
             'rot_mean': 'Rotation Error (deg)',
             'trans_mean': 'Translation Error (cm)',
             'add_mean': 'ADD(-S) (cm)',
-            'accuracy_10p': 'Accuracy @10% (%)'
+            'accuracy_10p': 'Accuracy @10% (%)',
+            'accuracy_2cm': 'Accuracy @2cm (%)'
         }
     )
 
@@ -308,12 +309,13 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
             'Rotation Error (deg)',
             'Translation Error (cm)',
             'ADD(-S) (cm)',
-            'Accuracy @10% (%)'
+            'Accuracy @10% (%)',
+            'Accuracy @2cm (%)'
         ]
     ]
 
     # --- FIX: Formattazione Stringa Forzata per evitare 17.969999 ---
-    cols_to_fix = ['Rotation Error (deg)', 'Translation Error (cm)', 'ADD(-S) (cm)', 'Accuracy @10% (%)']
+    cols_to_fix = ['Rotation Error (deg)', 'Translation Error (cm)', 'ADD(-S) (cm)', 'Accuracy @10% (%)', 'Accuracy @2cm (%)']
     for col in cols_to_fix:
         df[col] = df[col].apply(lambda x: f"{x:.2f}")
     # ----------------------------------------------------------------

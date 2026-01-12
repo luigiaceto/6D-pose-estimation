@@ -205,6 +205,7 @@ def evaluate_baseline_pipeline(
         metrics_df = pd.DataFrame(metrics)
         diam_cm = object_diameters[class_id] / 10.0
         acc_10p = np.mean(metrics_df['add'] < (diam_cm * 0.1)) * 100
+        acc_2cm = np.mean(metrics_df['add'] < 2.0) * 100  # 2 cm threshold
         
         per_class_results.append({
             'class_id': class_id, 
@@ -212,12 +213,14 @@ def evaluate_baseline_pipeline(
             'rot_mean': metrics_df['rotation'].mean(), 
             'trans_mean': metrics_df['translation'].mean(),  # Already in cm
             'add_mean': metrics_df['add'].mean() / 100.0,  # cm -> meters for print_table
-            'accuracy_10p': acc_10p
+            'accuracy_10p': acc_10p,
+            'accuracy_2cm': acc_2cm
         })
         
     all_adds = np.array(all_metrics['add'])
     all_diams_cm = np.array(all_metrics['diameters']) / 10.0
     acc_all = np.mean(all_adds < (all_diams_cm * 0.1)) * 100
+    acc_2cm = np.mean(all_adds < 2.0) * 100
     
     per_class_results.append({
         'class_id': 'MEAN', 
@@ -225,7 +228,8 @@ def evaluate_baseline_pipeline(
         'rot_mean': np.mean(all_metrics['rot_err']), 
         'trans_mean': np.mean(all_metrics['trans_err']),  # Already in cm
         'add_mean': np.mean(all_adds) / 100.0,  # cm -> meters for print_table
-        'accuracy_10p': acc_all
+        'accuracy_10p': acc_all,
+        'accuracy_2cm': acc_2cm
     })
     
     return print_evaluation_results_table(per_class_results)

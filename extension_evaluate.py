@@ -152,12 +152,16 @@ def evaluate_extension_batch(
     thresholds = all_diameters_m * 0.1
     accuracy = np.mean(all_add_np < thresholds) * 100
 
+    #ADD Accuracy @ 2cm
+    accuracy_2cm = np.mean(all_add_np < 0.02) * 100
+
     per_class_results = []
     for cls_id, metrics in sorted(per_class_metrics.items()):
         metrics_df = pd.DataFrame(metrics)
         cls_diam_m = object_diameters[cls_id] / 1000.0  
         cls_thresh_m = cls_diam_m * 0.1  
         cls_acc = np.mean(metrics_df['add'] < cls_thresh_m) * 100 
+        cls_acc_2cm = np.mean(metrics_df['add'] < 0.02) * 100
         
         per_class_results.append({
             'class_id': cls_id,
@@ -165,7 +169,8 @@ def evaluate_extension_batch(
             'rot_mean': metrics_df['rotation'].mean(),
             'trans_mean': metrics_df['translation'].mean(),
             'add_mean': metrics_df['add'].mean(),
-            'accuracy_10p': cls_acc
+            'accuracy_10p': cls_acc,
+            'accuracy_2cm': cls_acc_2cm
         })
         
     per_class_results.append({
@@ -174,7 +179,9 @@ def evaluate_extension_batch(
         'rot_mean': np.mean(all_rot_errors),
         'trans_mean': np.mean(all_trans_errors),
         'add_mean': np.mean(all_add),
-        'accuracy_10p': accuracy
+        'accuracy_10p': accuracy,
+        'accuracy_2cm': accuracy_2cm
+
     })
 
     return print_evaluation_results_table(per_class_results, save_table, table_path)

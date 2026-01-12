@@ -188,6 +188,7 @@ def evaluate_extension_pipeline(
         # metrics_df['add'] è in CM, convertiamo in METRI per confronto
         add_m = metrics_df['add'] / 100.0
         acc_10p = np.mean(add_m < threshold_m) * 100
+        acc_2cm = np.mean(add_m < 0.02) * 100  # 2 cm threshold
         
         per_class_results.append({
             'class_id': class_id, 
@@ -195,13 +196,15 @@ def evaluate_extension_pipeline(
             'rot_mean': metrics_df['rotation'].mean(), 
             'trans_mean': metrics_df['translation'].mean(),  # Already in cm
             'add_mean': metrics_df['add'].mean() / 100.0,  # cm -> meters for print_table
-            'accuracy_10p': acc_10p
+            'accuracy_10p': acc_10p,
+            'accuracy_2cm': acc_2cm
         })
         
     all_adds_cm = np.array(all_metrics['add'])  # CM
     all_adds_m = all_adds_cm / 100.0  # CM -> METRI
     all_diams_m = np.array(all_metrics['diameters']) / 1000.0  # MM -> METRI
     acc_all = np.mean(all_adds_m < (all_diams_m * 0.1)) * 100
+    acc_2cm_all= np.mean(all_adds_cm < 2) * 100
     
     per_class_results.append({
         'class_id': 'MEAN', 
@@ -209,7 +212,8 @@ def evaluate_extension_pipeline(
         'rot_mean': np.mean(all_metrics['rot_err']), 
         'trans_mean': np.mean(all_metrics['trans_err']),  # Already in cm
         'add_mean': np.mean(all_adds_cm) / 100.0,  # cm -> meters for print_table
-        'accuracy_10p': acc_all
+        'accuracy_10p': acc_all,
+        'accuracy_2cm': acc_2cm_all
     })
     
     return print_evaluation_results_table(per_class_results)
