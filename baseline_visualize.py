@@ -26,7 +26,7 @@ def visualize_baseline(
     cam_k,
     test_dataset=None,
     yolo_checkpoint=str(Path("checkpoints") / "best_yolo_model.pt"),
-    model_checkpoint=str(Path("checkpoints") / "best_pose_model.pt"),
+    model_checkpoint=str(Path("checkpoints") / "best_baseline_model.pt"),
     device='cuda',
     figsize=(18, 6),
     img_mean=[0.485, 0.456, 0.406],

@@ -23,7 +23,7 @@ def evaluate_baseline(
     test_dataset,
     test_loader,
     cam_k,
-    checkpoint_path=str(Path("checkpoints") / "best_pose_model.pt"), 
+    checkpoint_path=str(Path("checkpoints") / "best_baseline_model.pt"), 
     device='cuda',
     save_table=False,
     table_path="evaluation_results.csv"

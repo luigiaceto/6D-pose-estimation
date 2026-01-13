@@ -28,7 +28,7 @@ def evaluate_baseline_pipeline(
     test_loader,
     cam_k,
     yolo_checkpoint=str(Path("checkpoints") / "best_yolo_model.pt"),
-    model_checkpoint=str(Path("checkpoints") / "best_fusion_model.pt"),
+    model_checkpoint=str(Path("checkpoints") / "best_extension_model.pt"),
     device="cuda"
 ):
     
