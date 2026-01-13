@@ -105,5 +105,6 @@ The code requires Python and the following libraries:
 3. **TridentNet Training:** Run the training script. The training uses a multi-task loss (Rotation + Translation + Projection) and applies online augmentation (Synchronized ROI Jittering).
 4. **Evaluation:** Run the evaluation pipeline to compute ADD/ADD-S metrics on the test set.
 
-# Evaluation
-Trained weights for evaluation available at the link: https://drive.google.com/drive/folders/1oRhXsvlVgGiqvLWzTXqMOFf1CyeH-19k?usp=drive_link 
+
+### Checkpoints
+Trained weights for evaluation avalable [here](https://drive.google.com/drive/folders/1oRhXsvlVgGiqvLWzTXqMOFf1CyeH-19k?usp=drive_link).
