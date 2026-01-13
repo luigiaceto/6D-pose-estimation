@@ -100,29 +100,26 @@ class TridentNetPose(nn.Module):
         self._init_weights()
 
     def _init_weights(self):
-        # Inizializzazione GENERICA per i moduli "standard"
-        for m in [self.fusion_fc, self.z_head, self.offset_head]:
+        """Inizializzazione Xavier/Kaiming per layer custom."""
+        modules_with_relu = [self.fusion_fc, self.z_head, self.offset_head]
+        
+        for m in modules_with_relu:
             for layer in m.modules():
                 if isinstance(layer, nn.Linear):
-                    nn.init.xavier_uniform_(layer.weight, gain=1.0)
+                    nn.init.kaiming_normal_(layer.weight, mode='fan_out', nonlinearity='relu')
                     if layer.bias is not None:
                         nn.init.constant_(layer.bias, 0.0)
-        
-        # Inizializzazione SPECIFICA per la Rotazione (Rot Head)
-        # Gain 0.01 serve a far partire la rotazione come "quasi uniforme" ma deterministica
+
         nn.init.xavier_uniform_(self.rot_head.weight, gain=0.01)
-        
-        # Bias: Quaternione identità [1, 0, 0, 0] (w, x, y, z)
-        # Importante: così all'inizio la rete predice "nessuna rotazione" invece di rotazione random
         with torch.no_grad():
             self.rot_head.bias.fill_(0)
             self.rot_head.bias[0] = 1.0
 
-        # Sovrascrittura SPECIFICA per l'ultimo layer di Z (Residual).
-        # I layer precedenti di z_head sono stati inizializzati nel loop sopra (gain 1.0).
-        # Qui sovrascriviamo SOLO l'ultimo per farlo partire da ~0.
         nn.init.xavier_uniform_(self.z_head[-1].weight, gain=0.01)
         nn.init.constant_(self.z_head[-1].bias, 0.0)
+
+        nn.init.xavier_uniform_(self.offset_head[-1].weight, gain=0.01)
+        nn.init.constant_(self.offset_head[-1].bias, 0.0)
 
     def forward(self, rgb, depth, bbox_center_pixel, bbox_dims):
         """
