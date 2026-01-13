@@ -88,7 +88,6 @@ class ExtensionLoss(nn.Module):
         
         is_symmetric = self.symmetry_lookup[class_ids.long()]  # (B,)
         
-        # This avoids expensive O(N²) cdist computation for asymmetric objects
         loss_rot_values = torch.zeros(len(class_ids), device=device)
         
         # Compute ADD for asymmetric objects only

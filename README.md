@@ -33,11 +33,15 @@ TridentNet is designed to solve the "Weak Perspective" ambiguity that affects mo
 ### Pinhole Back-Projection
 Unlike direct translation regression, TridentNet recovers the 3D Translation $T_{xyz}$ analytically using the predicted depth and offsets combined with the camera intrinsic matrix. This ensures geometric consistency between the 2D detections and 3D space.
 
+![alt text](images/extension_out.png)
+
 ## Comparison with Geometric Baseline
 
 To validate the approach, we implemented a **Geometric Baseline** for comparison:
 * **Method:** Uses ResNet-50 for rotation but calculates translation purely mathematically, assuming the object is a sphere and estimating depth based on the 2D bounding box size (Weak Perspective Approximation).
 * **Result:** This method fails on irregular objects (e.g., Driller, Ape), proving that 2D dimensions are not linearly correlated with depth due to perspective distortions.
+
+![alt text](images/baseline_out.png)
 
 ## Dataset Structure
 

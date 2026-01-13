@@ -145,7 +145,7 @@ class TridentNetPose(nn.Module):
         # --- Feature Extraction ---
         rgb_feat = self.rgb_backbone(rgb).view(rgb.size(0), -1)     # (B, 2048)
         depth_centered = depth - z_geometric.view(-1, 1, 1, 1)
-        depth_feat = self.depth_backbone(depth_centered)                     # (B, 512)
+        depth_feat = self.depth_backbone(depth_centered)             # (B, 512)
         
         # --- Fusion ---
         fused = torch.cat([rgb_feat, depth_feat, bbox_dims], dim=1) # (B, 2562)
@@ -163,9 +163,9 @@ class TridentNetPose(nn.Module):
         
         # Offset 2D (percentuale bbox)
         delta_pct = self.offset_head(fused)  # (B, 2)
-        offset_px_x = delta_pct[:, 0:1] * bbox_dims[:, 0:1] * IMG_WIDTH  # (B, 1)
-        offset_px_y = delta_pct[:, 1:2] * bbox_dims[:, 1:2] * IMG_HEIGHT  # (B, 1)
-        offset_px = torch.cat([offset_px_x, offset_px_y], dim=1)     # (B, 2)
+        offset_px_x = delta_pct[:, 0:1] * bbox_dims[:, 0:1] * IMG_WIDTH     # (B, 1)
+        offset_px_y = delta_pct[:, 1:2] * bbox_dims[:, 1:2] * IMG_HEIGHT    # (B, 1)
+        offset_px = torch.cat([offset_px_x, offset_px_y], dim=1)            # (B, 2)
         
         # Coordinate pixel finali
         pred_uv = bbox_center_pixel + offset_px  # (B, 2)

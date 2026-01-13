@@ -222,7 +222,7 @@ def compute_rotation_error(pred_quat, gt_quat, class_ids, symmetry_lookup, model
         
         errors = torch.zeros(B, device=device)
         
-        # --- 1. OGGETTI ASIMMETRICI (Metodo Quaternioni) ---
+        # --- OGGETTI ASIMMETRICI (Metodo Quaternioni) ---
         if (~is_sym).any():
             p_q = F.normalize(pred_quat[~is_sym], p=2, dim=1)
             g_q = F.normalize(gt_quat[~is_sym], p=2, dim=1)
@@ -234,7 +234,7 @@ def compute_rotation_error(pred_quat, gt_quat, class_ids, symmetry_lookup, model
             # Formula: 2 * acos(|<q1, q2>|)
             errors[~is_sym] = torch.rad2deg(2 * torch.acos(dot))
             
-        # --- 2. OGGETTI SIMMETRICI ---
+        # --- OGGETTI SIMMETRICI ---
         if is_sym.any():
             p_R = quaternion_to_rotation_matrix(pred_quat[is_sym])
             g_R = quaternion_to_rotation_matrix(gt_quat[is_sym])
@@ -311,11 +311,9 @@ def print_evaluation_results_table(metrics_per_class, save_table=False, table_pa
         ]
     ]
 
-    # --- FIX: Formattazione Stringa Forzata per evitare 17.969999 ---
     cols_to_fix = ['Rotation Error (deg)', 'Translation Error (cm)', 'ADD(-S) (cm)', 'Accuracy @10% (%)', 'Accuracy @2cm (%)']
     for col in cols_to_fix:
         df[col] = df[col].apply(lambda x: f"{x:.2f}")
-    # ----------------------------------------------------------------
 
     if save_table:
         df.to_csv(table_path, index=False)
