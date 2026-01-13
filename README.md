@@ -104,3 +104,7 @@ The code requires Python and the following libraries:
 2. **YOLO Training:** Train the object detector to generate 2D bounding boxes.
 3. **TridentNet Training:** Run the training script. The training uses a multi-task loss (Rotation + Translation + Projection) and applies online augmentation (Synchronized ROI Jittering).
 4. **Evaluation:** Run the evaluation pipeline to compute ADD/ADD-S metrics on the test set.
+
+
+### Checkpoints
+Trained weights for evaluation available [here](https://drive.google.com/drive/folders/1oRhXsvlVgGiqvLWzTXqMOFf1CyeH-19k?usp=drive_link).
