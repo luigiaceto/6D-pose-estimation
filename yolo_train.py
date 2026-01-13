@@ -59,7 +59,7 @@ def train_YOLO(
     )
     
     # Copy best model to checkpoints
-    best_model_src = Path("runs") / "detect" / "train" / "weights" / "best_pose_model.pt"
+    best_model_src = Path("runs") / "detect" / "train" / "weights" / "best_baseline_model.pt"
     best_model_dst = checkpoint_dir / "best_yolo_model.pt"
     
     if best_model_src.exists():

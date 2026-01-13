@@ -304,7 +304,7 @@ def train(
                 'best_loss': best_loss
             }
             
-            save_path = str(Path(checkpoint_dir) / "best_fusion_model.pt")
+            save_path = str(Path(checkpoint_dir) / "best_extension_model.pt")
             torch.save(checkpoint_dict, save_path)
             print(f"✅ Checkpoint saved: {save_path} (Loss: {best_loss:.4f})")
         print()
