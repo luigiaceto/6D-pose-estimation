@@ -107,4 +107,4 @@ The code requires Python and the following libraries:
 
 
 ### Checkpoints
-Trained weights for evaluation avalable [here](https://drive.google.com/drive/folders/1oRhXsvlVgGiqvLWzTXqMOFf1CyeH-19k?usp=drive_link).
+Trained weights for evaluation available [here](https://drive.google.com/drive/folders/1oRhXsvlVgGiqvLWzTXqMOFf1CyeH-19k?usp=drive_link).
